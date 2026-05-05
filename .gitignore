@@ -1,0 +1,88 @@
+# System Files
+.DS_Store
+Thumbs.db
+*.local
+*.bak
+*.tmp
+temp/
+
+# Dependencies
+node_modules/
+
+# Build Outputs
+build/
+dist/
+out/
+web-build/
+.expo/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+service-account.json
+
+# Archive folder (old/backup files)
+archive/
+
+# Oracle server (formerly ignored)
+# oracle-server-backend/
+
+# Operations scripts
+ops-scripts/
+
+# Project Specific
+*.md
+!README.md
+!DAILY_DEV_GUIDE.txt
+!innerorbit-universal/docs/*.md
+
+# Mobile Builds
+*.apk
+*.aab
+*.ipa
+*.asar
+
+# Desktop Builds
+*.exe
+*.dmg
+*.zip
+*.AppImage
+
+# Release builds
+release/
+innerorbit-universal/release/
+
+# Java JDK
+java-17/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Temporary
+dist_v2/

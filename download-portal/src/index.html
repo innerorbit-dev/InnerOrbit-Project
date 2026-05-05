@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<!-- InnerOrbit Portal v1.0.1 -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InnerOrbit - Secure Access Portal</title>
+    <meta name="description" content="Secure access portal for InnerOrbit application downloads. Authorized personnel only.">
+    <meta name="keywords" content="InnerOrbit, CalcX, Secure Download, Android App, APK, Encrypted Chat, Portal">
+    
+    <!-- ADDED: Noindex for Security/Privacy -->
+    <meta name="robots" content="noindex, nofollow">
+
+    <!-- Theme Initialization: Prevent flicker by applying theme before render -->
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('innerorbit-theme') || 'default';
+            if (savedTheme !== 'default') {
+                document.documentElement.setAttribute('data-theme', savedTheme);
+            }
+        })();
+    </script>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <link rel="shortcut icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <link rel="alternate icon" type="image/png" href="assets/logos/innerorbit-logo.png">
+    <link href="css/style.css" rel="stylesheet">
+
+    <!-- React & ReactDOM -->
+    <script src="js/vendor/react.min.js"></script>
+    <script src="js/vendor/react-dom.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="js/vendor/babel.min.js"></script>
+    
+    <!-- AngularJS -->
+    <script src="js/vendor/angular.min.js"></script>
+    
+    <!-- Animations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.29/bundled/lenis.min.js"></script>
+    
+    <!-- Authentication Logic -->
+    <script src="js/authentication.js"></script>
+    <!-- Angular Docs Logic -->
+    <script src="js/docs.js"></script>
+    <!-- Network Monitor (Offline Support) -->
+    <script src="js/network-monitor.js"></script>
+
+
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <script>
+        const firebaseConfig = { 
+            apiKey: "AIzaSyBZIRJuQ4Ltn_c8ciqykG5KUvHXSFzTy_w", 
+            authDomain: "innerorbit-portal.firebaseapp.com", 
+            projectId: "innerorbit-portal", 
+            storageBucket: "innerorbit-portal.firebasestorage.app", 
+            messagingSenderId: "616184841875", 
+            appId: "1:616184841875:web:133ebb0b367f983e2d6f66", 
+            measurementId: "G-FRBP7HBBGD" 
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Fade out header during transition */
+        .header.fade-out {
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        @keyframes portalPulse {
+            0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+        }
+
+        /* 4. Icon Pop (The "Access" Symbol) */
+        .portal-icon-container {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0;
+            z-index: 1000;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        .portal-icon {
+            width: 120px;
+            height: auto;
+            filter: drop-shadow(0 15px 35px rgba(59, 130, 246, 0.5));
+            margin-bottom: 24px;
+            transform: scale(0.5); /* Initial scale for GSAP pop */
+        }
+
+        .portal-text {
+            font-family: 'Inter', sans-serif;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 6px;
+            color: #fff;
+            text-transform: uppercase;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+            opacity: 0; /* Initial opacity for GSAP fade in */
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000000;
+            color: #f8fafc;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        #login-view {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            z-index: 50;
+            width: 100%;
+        }
+
+        #portal-view {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 10;
+        }
+
+        /* Animated Tech Background Layers */
+        #login-view::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: 
+                radial-gradient(ellipse at 20% 80%, rgba(234, 88, 12, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.2) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.8) 0%, #000000 100%);
+            z-index: -2;
+        }
+
+        /* Flowing Wave SVG Background */
+        #login-view::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg width='1920' height='1080' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='purpleGrad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23a855f7;stop-opacity:0.6'/%3E%3Cstop offset='100%25' style='stop-color:%23ec4899;stop-opacity:0.4'/%3E%3C/linearGradient%3E%3ClinearGradient id='orangeGrad' x1='0%25' y1='100%25' x2='100%25' y2='0%25'%3E%3Cstop offset='0%25' style='stop-color:%23f59e0b;stop-opacity:0.5'/%3E%3Cstop offset='100%25' style='stop-color:%23ea580c;stop-opacity:0.6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0,800 Q400,600 800,700 T1600,650 L1920,1080 L0,1080 Z' fill='url(%23purpleGrad)' opacity='0.3'/%3E%3Cpath d='M0,900 Q300,750 600,850 T1200,800 L1920,1080 L0,1080 Z' fill='url(%23purpleGrad)' opacity='0.2'/%3E%3Cpath d='M1920,300 Q1500,200 1100,280 T300,250 L0,0 L1920,0 Z' fill='url(%23orangeGrad)' opacity='0.25'/%3E%3Cpath d='M1920,200 Q1600,100 1200,180 T400,150 L0,0 L1920,0 Z' fill='url(%23orangeGrad)' opacity='0.15'/%3E%3C/svg%3E");
+            background-size: cover;
+            background-position: center;
+            z-index: -1;
+            opacity: 0.8;
+        }
+
+        .container {
+            background: rgba(20, 20, 30, 0.25);
+            backdrop-filter: blur(30px) saturate(150%);
+            -webkit-backdrop-filter: blur(30px) saturate(150%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 24px;
+            padding: 40px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow:
+                0 8px 32px 0 rgba(0, 0, 0, 0.5),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+                0 0 80px rgba(168, 85, 247, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+
+        .password-form {
+            margin-top: 24px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 11px;
+            color: #64748b;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px 50px 12px 16px;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            color: #f8fafc;
+            font-size: 15px;
+            font-family: inherit;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        .input-group input:focus {
+            border-color: rgba(168, 85, 247, 0.5);
+            background: rgba(15, 23, 42, 0.7);
+            box-shadow: 0 0 20px rgba(168, 85, 247, 0.15);
+        }
+
+        /* Hide Browser Native Password Reveal Icons */
+        input::-ms-reveal,
+        input::-ms-clear {
+            display: none;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #94a3b8; /* Matched to text-secondary */
+            cursor: pointer;
+            padding: 8px;
+            transition: all 0.2s ease;
+            z-index: 10;
+        }
+
+        .password-toggle:hover {
+            color: #a855f7; /* Matched to purple accent */
+            filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.4));
+        }
+
+        .submit-btn {
+            width: 100%;
+            background: linear-gradient(135deg, #a855f7 0%, #ea580c 100%);
+            color: white;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .submit-btn:hover {
+            transform: scale(0.98);
+            box-shadow: 
+                0 4px 10px rgba(234, 88, 12, 0.3),
+                0 0 15px rgba(168, 85, 247, 0.3);
+            border-color: rgba(255, 255, 255, 0.2);
+            filter: brightness(1.1);
+        }
+
+        .submit-btn:active {
+            transform: scale(0.95);
+            filter: brightness(0.9);
+        }
+
+        .error-message {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+            padding: 12px 16px;
+            border-radius: 10px;
+            font-size: 13px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .security-notice {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(22, 163, 74, 0.08) 100%);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 24px;
+            text-align: center;
+        }
+
+        .security-notice .icon {
+            color: #c52222;
+            font-size: 20px;
+            margin-bottom: 8px;
+        }
+
+        .security-notice .title {
+            color: #de4a4a;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .security-notice .text {
+            color: #ef8686;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .page-footer {
+            margin-top: 24px;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1.6;
+            letter-spacing: 0.2px;
+        }
+
+        .page-footer a {
+            color: #cbd5e1;
+            text-decoration: none;
+            margin: 0 8px;
+            font-weight: 600;
+            transition: color 0.2s;
+        }
+
+        .page-footer a:hover {
+            color: #fff;
+            text-decoration: underline;
+        }
+
+        /* --- Logo Fix --- */
+        img[src*="innerorbit-logo"], 
+        .logo-img {
+            /* Keep Original Colors (No Invert) */
+            filter: none;
+            mix-blend-mode: normal;
+
+            /* 3D Depth & Pop Effect */
+            /* 1. Dark shadow for depth */
+            /* 2. Slight white glow to separate from dark bg */
+            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.6)) drop-shadow(0 0 15px rgba(255,255,255,0.15));
+            
+            /* 3D Transform */
+            transform: perspective(500px) translateZ(0);
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Bouncy pop */
+        }
+
+        img[src*="innerorbit-logo"]:hover, 
+        .logo-img:hover {
+            transform: perspective(500px) translateZ(30px) scale(1.1);
+        }
+
+
+        @media (max-width: 480px) {
+            .container {
+                padding: 24px 20px;
+                margin: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="login-view">
+        <div class="container">
+            <div class="header">
+            <h1>InnerOrbit Portal</h1>
+            <p>Access your secure download portal. Enter your credentials to continue.</p>
+        </div>
+
+        <form class="password-form" id="passwordForm">
+            <div class="error-message" id="errorMessage">
+                Access denied. Please check your credentials and try again.
+            </div>
+
+            <div class="input-group">
+                <label for="password">Access Password</label>
+                <div class="input-wrapper">
+                    <input
+                        type="password"
+                        id="password"
+                        placeholder="Enter current year"
+                        autocomplete="off"
+                        required
+                        enterkeyhint="go"
+                        autofocus
+                    >
+                    <button type="button" class="password-toggle" id="passwordToggle" aria-label="Toggle password visibility">
+                        <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <button type="submit" class="submit-btn" id="submitBtn">
+                Access Portal
+            </button>
+
+            <div class="security-notice">
+                <div class="icon">⚠️</div>
+                <div class="text">This portal is password protected. Only authorized users can access downloads.</div>
+            </div>
+        </form>
+    </div>
+
+    <div class="page-footer">
+        &copy; 2026 InnerOrbit. All rights reserved.<br>
+        <a href="privacy-policy.html">Privacy Policy</a> | 
+        <a href="terms-of-service.html">Terms of Service</a>
+    </div>
+    </div> <!-- End login-view -->
+
+    <div id="portal-view" style="display: none; opacity: 0; pointer-events: none;">
+        <div id="react-root"></div>
+        <div id="angular-docs-root" ng-controller="DocsController"></div>
+
+        <!-- Documentation Link Modal -->
+        <div id="docsLinkModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); z-index:999; justify-content:center; align-items:center;">
+            <div style="background:#1e293b; padding:2rem; border-radius:16px; max-width:400px; text-align:center; border:1px solid rgba(168,85,247,0.3);">
+                <h2 style="color:#f1f5f9; margin-bottom:1rem;">Documentation</h2>
+                <p style="color:#cbd5e1; margin-bottom:2rem;">Access our comprehensive documentation covering features, installation, security, and more.</p>
+                <a href="docs.html" style="display:inline-block; padding:0.75rem 1.5rem; background:linear-gradient(135deg,#06b6d4,#a855f7); color:white; text-decoration:none; border-radius:8px; font-weight:600; margin-right:0.5rem;">View Docs</a>
+                <button id="closeDocsModal" style="padding:0.75rem 1.5rem; background:rgba(168,85,247,0.2); color:#06b6d4; border:1px solid rgba(168,85,247,0.4); border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
+            </div>
+        </div>
+
+        <!-- Custom Notification Modal -->
+        <div id="customModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(2, 6, 23, 0.8); backdrop-filter: blur(8px); z-index:10000; justify-content:center; align-items:center;">
+            <div style="background:rgba(30, 41, 59, 0.9); padding:2.5rem; border-radius:24px; max-width:420px; width:90%; text-align:center; border:1px solid rgba(34, 211, 238, 0.2); box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+                <div id="customModalIcon" style="font-size: 3rem; margin-bottom: 1rem;">✨</div>
+                <h2 id="customModalTitle" style="color:#f1f5f9; margin-bottom:1rem; font-weight:700;">Notification</h2>
+                <p id="customModalMessage" style="color:#94a3b8; margin-bottom:2rem; line-height:1.6;">Message goes here.</p>
+                <button id="closeCustomModal" style="padding:12px 32px; background:linear-gradient(135deg, #06b6d4, #3b82f6); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:600; font-size:1rem; transition: transform 0.2s;">Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Portal Icon Container for Transition -->
+    <div class="portal-icon-container" id="portalIconContainer" style="z-index: 10000;">
+        <img src="assets/InnerOrbit-Logo.webp" alt="Access Granted" class="portal-icon" id="animatedLogo">
+        <div class="portal-text">Access Granted</div>
+    </div>
+
+    <!-- Development Optimization: Bypass Service Worker during local dev for instant reloading -->
+    <script>
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(registrations => {
+                    for(let registration of registrations) {
+                        registration.unregister();
+                    }
+                });
+            }
+        }
+    </script>
+
+    <script>
+        /* SHA-256 Hash Function */
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        }
+
+        /* Get elements */
+        const form = document.getElementById('passwordForm');
+        const passwordInput = document.getElementById('password');
+        const passwordToggle = document.getElementById('passwordToggle');
+        const errorMessage = document.getElementById('errorMessage');
+        const submitBtn = document.getElementById('submitBtn');
+
+        /* AUTO-FOCUS ON LOAD (Start typing immediately) */
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                passwordInput.focus();
+            }, 100);
+        });
+
+        /* Password visibility toggle */
+        if (passwordToggle) {
+            passwordToggle.addEventListener('click', (e) => {
+                e.preventDefault();
+                const type = passwordInput.type === 'password' ? 'text' : 'password';
+                passwordInput.type = type;
+                
+                /* Toggle Premium SVG Icon */
+                if (type === 'text') {
+                    /* Eye-off (Slashing eye) */
+                    passwordToggle.innerHTML = `
+                        <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                            <line x1="1" y1="1" x2="23" y2="23"></line>
+                        </svg>
+                    `;
+                } else {
+                    /* Eye (Open) */
+                    passwordToggle.innerHTML = `
+                        <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                    `;
+                }
+            });
+        }
+
+        /* FORCE SUBMIT ON ENTER (Fix for Mobile/Virtual Keyboards) */
+        /* Handles both standard Enter key and mobile "Go" actions */
+        passwordInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.keyCode === 13) {
+                e.preventDefault();
+                submitBtn.click();
+            }
+        });
+
+        /* SECURITY: Lockout Logic */
+        const MAX_ATTEMPTS = 3;
+        const LOCKOUT_DURATION = 30 * 60 * 1000; /* 30 minutes */
+
+        function checkLockout() {
+            const lockoutStart = localStorage.getItem('lockoutTimestamp');
+            if (lockoutStart) {
+                const now = Date.now();
+                if (now - parseInt(lockoutStart) < LOCKOUT_DURATION) {
+                    /* Still locked out */
+                    window.location.href = '404.html?error=locked';
+                    return true;
+                } else {
+                    /* Lockout expired, clear it */
+                    localStorage.removeItem('lockoutTimestamp');
+                    localStorage.removeItem('failedAttempts');
+                }
+            }
+            return false;
+        }
+
+        /* Handle form submission */
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (checkLockout()) return;
+
+            const enteredPassword = passwordInput.value.trim();
+            const passwordHash = await sha256(enteredPassword);
+            
+            /* Show loading state */
+            const originalBtnText = form.querySelector('.submit-btn').textContent;
+            form.querySelector('.submit-btn').textContent = 'Verifying...';
+            form.querySelector('.submit-btn').disabled = true;
+
+            try {
+                /* 1. Check if hash exists in 'portal_passwords' collection */
+                const docRef = db.collection('portal_passwords').doc(passwordHash);
+                const docSnap = await docRef.get();
+
+                if (docSnap.exists && docSnap.data().active) {
+                    /* SUCCESS: Run Transition Animation */
+                    
+                    /* 1. Store session */
+                    sessionStorage.setItem('portalAccess', 'granted');
+                    document.body.classList.add('authenticated');
+
+                    /* 2. TRIGGER GSAP ANIMATION TIMELINE */
+                    const tl = gsap.timeline({});
+
+                    const container = document.querySelector('.container');
+                    const iconContainer = document.getElementById('portalIconContainer');
+                    const portalIcon = iconContainer.querySelector('.portal-icon');
+                    const portalText = iconContainer.querySelector('.portal-text');
+                    const portalView = document.getElementById('portal-view');
+                    const loginView = document.getElementById('login-view');
+
+                    /* Step 1: Fade out login container */
+                    tl.to(container, {
+                        opacity: 0,
+                        scale: 0.9,
+                        filter: 'blur(10px)',
+                        duration: 0.8,
+                        ease: 'power3.inOut'
+                    });
+
+                    /* Step 2: Show Access Granted Pop */
+                    tl.set(iconContainer, { opacity: 1 }, "-=0.2");
+                    tl.to(portalIcon, {
+                        scale: 1,
+                        opacity: 1,
+                        duration: 1.2,
+                        ease: "back.out(1.7)"
+                    }, "-=0.4");
+                    
+                    tl.to(portalText, {
+                        opacity: 1,
+                        y: -10,
+                        duration: 0.8,
+                        ease: "power2.out"
+                    }, "-=0.8");
+
+                    /* Step 3: Pause briefly */
+                    tl.to({}, { duration: 1 });
+
+                    /* Step 4: TRAVEL! Smoothly move logo to top-left */
+                    tl.to(portalText, { opacity: 0, duration: 0.4 });
+                    
+                    /* Calculate target left offset to match main-portal container */
+                    const winWidth = window.innerWidth;
+                    const containerWidth = Math.min(winWidth, 1200);
+                    let targetLeft = (winWidth - containerWidth) / 2 + 20;
+                    if (winWidth <= 480) targetLeft = 16;
+
+                    /* Make portal-view display block so rendering calculates correctly */
+                    tl.call(() => {
+                        portalView.style.display = 'block';
+                        void portalView.offsetWidth; // force reflow
+                    }, null, "-=0.2");
+
+                    /* Move Logo */
+                    tl.to(portalIcon, {
+                        x: -(winWidth / 2) + targetLeft + 22,
+                        y: -(window.innerHeight / 2) + 20 + 22,
+                        width: 44,
+                        height: 44,
+                        filter: 'drop-shadow(0 8px 12px rgba(0,0,0,0.6))',
+                        duration: 1.2,
+                        ease: "power4.inOut"
+                    }, "-=0.2");
+
+                    /* Fade IN portal view as the logo is traveling! */
+                    tl.to(portalView, {
+                        opacity: 1,
+                        pointerEvents: 'auto',
+                        duration: 0.8
+                    }, "-=0.8");
+                    
+                    /* Fade OUT login view completely */
+                    tl.to(loginView, {
+                        opacity: 0,
+                        duration: 0.8
+                    }, "-=1.0");
+
+                    /* Final Cleanup */
+                    tl.call(() => {
+                        loginView.style.display = 'none';
+                        iconContainer.style.display = 'none'; // Navbar logo takes over
+                        if (window.ScrollTrigger) window.ScrollTrigger.refresh();
+                    });
+
+                } else {
+                    /* FAILURE */
+                    handleLoginFailure();
+                }
+            } catch (error) {
+                console.error("Login Error:", error);
+                handleLoginFailure(true);
+            }
+        });
+
+        function handleLoginFailure(isSystemError = false) {
+            errorMessage.textContent = isSystemError 
+                ? 'System error. Please try again later.' 
+                : 'Access denied. Please check your credentials.';
+            errorMessage.classList.add('show');
+            form.querySelector('.submit-btn').textContent = 'Access Portal'; /* Reset button text */
+            form.querySelector('.submit-btn').disabled = false;
+            
+            /* Record failure */
+            let failures = parseInt(localStorage.getItem('failedAttempts') || '0');
+            failures++;
+            localStorage.setItem('failedAttempts', failures);
+            
+            if (failures >= MAX_ATTEMPTS) {
+                localStorage.setItem('lockoutTimestamp', Date.now());
+                checkLockout();
+            }
+        }
+
+        /* Check if already authenticated */
+        window.addEventListener('load', () => {
+            const access = sessionStorage.getItem('portalAccess');
+
+            if (access === 'granted') {
+                /* Already authenticated, show portal immediately */
+                document.getElementById('login-view').style.display = 'none';
+                document.body.classList.add('authenticated');
+                
+                const portalView = document.getElementById('portal-view');
+                portalView.style.display = 'block';
+                portalView.style.opacity = '1';
+                portalView.style.pointerEvents = 'auto';
+                
+                document.getElementById('portalIconContainer').style.display = 'none';
+                if (window.ScrollTrigger) window.ScrollTrigger.refresh();
+            }
+        });
+    </script>
+    <!-- Authentication Logic -->
+    <script src="js/authentication.js"></script>
+    <!-- Angular Docs Logic -->
+    <script src="js/docs.js"></script>
+    <!-- Network Monitor (Offline Support) -->
+    <script src="js/network-monitor.js">    </script>
+    <script type="text/babel" src="js/script.js" defer></script>
+    <script>
+        // Docs modal functionality
+        window.addEventListener('load', () => {
+            const docsModal = document.getElementById('docsLinkModal');
+            const closeDocsBtn = document.getElementById('closeDocsModal');
+            
+            if (closeDocsBtn) {
+                closeDocsBtn.addEventListener('click', () => {
+                    docsModal.style.display = 'none';
+                });
+            }
+
+            // Make docs accessible through the UI
+            window.openDocs = () => {
+                window.location.href = 'docs.html';
+            };
+        });
+    </script>    
+</body>
+</html>

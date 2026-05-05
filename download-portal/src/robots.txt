@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://innerorbit-20736.web.app/sitemap.xml

@@ -1,0 +1,33 @@
+# Expo
+.expo/
+dist/
+web-build/
+
+# Native
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Metro
+.metro-health-check*
+
+# Node
+node_modules/
+
+# Android
+android/.gradle
+android/build
+android/app/build
+
+# iOS
+ios/Pods
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local

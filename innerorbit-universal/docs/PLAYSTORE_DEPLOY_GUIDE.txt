@@ -1,0 +1,92 @@
+###############################################################################
+#               CALCX - GOOGLE PLAY STORE DEPLOYMENT GUIDE                   #
+###############################################################################
+
+This guide outlines the steps to build and submit your Expo React Native app
+to the Google Play Store using EAS (Expo Application Services).
+
+===============================================================================
+1. PREREQUISITES
+===============================================================================
+* A Google Play Developer Account ($25 one-time fee).
+* Expo Application Services (EAS) CLI installed:
+  > npm install -g eas-cli
+* Logged in to your Expo account:
+  > eas login
+* A valid 'bundleIdentifier' (e.g., com.innerorbit.calcx) in app.json.
+
+===============================================================================
+2. CONFIGURE app.json
+===============================================================================
+Ensure your 'expo' object in app.json contains:
+{
+  "expo": {
+    "name": "CalcX",
+    "slug": "calcx",
+    "version": "1.0.0",
+    "android": {
+      "package": "com.innerorbit.calcx",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F172A"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/[YOUR-PROJECT-ID]"
+    }
+  }
+}
+
+===============================================================================
+3. INITIALIZE EAS BUILD
+===============================================================================
+Run this in the 'innerorbit-universal' directory:
+> eas build:configure
+
+Select "Android" when prompted. This creates 'eas.json'.
+
+===============================================================================
+4. GENERATE PRODUCTION BUILD (AAB)
+===============================================================================
+Google Play requires the 'Android App Bundle' (.aab) format.
+Run the production build command:
+> eas build --platform android --profile production
+
+* EAS will ask if you want it to handle the Android Keystore.
+* Choose "Yes" (Recommended) to let Expo manage your signatures.
+* Once the build finishes, you will get a download link for the .aab file.
+
+===============================================================================
+5. GOOGLE PLAY CONSOLE SETUP
+===============================================================================
+1. Log in to https://play.google.com/console
+2. Click "Create app".
+3. Enter App Name, Default Language, and App Category.
+4. Complete the "Set up your app" tasks (Dashboard):
+   - Privacy Policy (Required!)
+   - App Access (No login credentials needed for calculator, or provide a test user)
+   - Ads (Declare if app contains ads)
+   - Content Rating (Complete the questionnaire)
+   - Target Audience (e.g., 13+)
+
+===============================================================================
+6. UPLOAD & RELEASE
+===============================================================================
+1. Go to "Production" -> "Create new release".
+2. Upload the .aab file you downloaded from Expo EAS.
+3. Enter Release Name (e.g., 1.0.0 (1)) and Release Notes.
+4. Click "Next" -> "Save" -> "Review release".
+5. IMPORTANT: Start with an "Internal Testing" track first!
+6. Once verified, promote to "Production".
+
+===============================================================================
+7. TROUBLESHOOTING
+===============================================================================
+* Error: "Package name already exists": Change 'package' in app.json to something unique.
+* Error: "Version code used": Increment the 'versionCode' in app.json for every new upload.
+* Error: "Large bundle size": Ensure your assets (images/videos) are optimized/compressed.
+
+###############################################################################
+Generated for CalcX Mobile App - 2026
+###############################################################################

@@ -1,0 +1,24 @@
+{
+  "name": "download-portal",
+  "version": "1.0.0",
+  "description": "A password-protected download portal where:\r - Users need email + password to access downloads\r - Admin (you) controls who can download\r - Tracks all download attempts\r - Distributes APK and Windows EXE files",
+  "main": "setup-database.js",
+  "scripts": {
+    "dev": "browser-sync start --server 'src' --files 'src' --port 5679 --no-notify --no-ui --open",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@babel/standalone": "^7.28.6",
+    "angular": "^1.8.3",
+    "gsap": "^3.14.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "browser-sync": "^3.0.4"
+  }
+}

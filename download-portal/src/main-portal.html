@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InnerOrbit - Secure Social Discovery</title>
+
+    <!-- favicons -->
+    <link rel="icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <link rel="shortcut icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <!-- Fallback for browsers that don't support WebP favicons -->
+    <link rel="alternate icon" type="image/png" href="assets/logos/innerorbit-logo.png">
+    
+
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- React & ReactDOM -->
+    <script src="js/vendor/react.min.js"></script>
+    <script src="js/vendor/react-dom.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="js/vendor/babel.min.js"></script>
+    
+    <!-- AngularJS -->
+    <script src="js/vendor/angular.min.js"></script>
+    
+    <!-- Animations -->
+    <script src="js/vendor/gsap.min.js"></script>
+    <script src="js/vendor/ScrollTrigger.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.29/bundled/lenis.min.js"></script>
+
+    <!-- Authentication Logic -->
+    <script src="js/authentication.js"></script>
+    <!-- Angular Docs Logic -->
+    <script src="js/docs.js"></script>
+    <!-- Network Monitor (Offline Support) -->
+    <script src="js/network-monitor.js"></script>
+
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+</head>
+  
+<body>
+    
+    <!-- Modern Dynamic Background (Handled by CSS) -->
+
+    <div id="react-root"></div>
+    <div id="angular-docs-root" ng-controller="DocsController"></div>
+
+    <!-- Documentation Link Modal -->
+    <div id="docsLinkModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); z-index:999; justify-content:center; align-items:center;">
+        <div style="background:#1e293b; padding:2rem; border-radius:16px; max-width:400px; text-align:center; border:1px solid rgba(168,85,247,0.3);">
+            <h2 style="color:#f1f5f9; margin-bottom:1rem;">Documentation</h2>
+            <p style="color:#cbd5e1; margin-bottom:2rem;">Access our comprehensive documentation covering features, installation, security, and more.</p>
+            <a href="docs.html" style="display:inline-block; padding:0.75rem 1.5rem; background:linear-gradient(135deg,#06b6d4,#a855f7); color:white; text-decoration:none; border-radius:8px; font-weight:600; margin-right:0.5rem;">View Docs</a>
+            <button id="closeDocsModal" style="padding:0.75rem 1.5rem; background:rgba(168,85,247,0.2); color:#06b6d4; border:1px solid rgba(168,85,247,0.4); border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
+        </div>
+    </div>
+
+    <!-- Custom Notification Modal -->
+    <div id="customModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(2, 6, 23, 0.8); backdrop-filter: blur(8px); z-index:10000; justify-content:center; align-items:center;">
+        <div style="background:rgba(30, 41, 59, 0.9); padding:2.5rem; border-radius:24px; max-width:420px; width:90%; text-align:center; border:1px solid rgba(34, 211, 238, 0.2); box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+            <div id="customModalIcon" style="font-size: 3rem; margin-bottom: 1rem;">✨</div>
+            <h2 id="customModalTitle" style="color:#f1f5f9; margin-bottom:1rem; font-weight:700;">Notification</h2>
+            <p id="customModalMessage" style="color:#94a3b8; margin-bottom:2rem; line-height:1.6;">Message goes here.</p>
+            <button id="closeCustomModal" style="padding:12px 32px; background:linear-gradient(135deg, #06b6d4, #3b82f6); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:600; font-size:1rem; transition: transform 0.2s;">Got it</button>
+        </div>
+    </div>
+
+    <!-- Main Logic (React + Angular + Legacy) -->
+    <script type="text/babel" src="js/script.js" defer></script>
+    <script>
+        // Docs modal functionality
+        const docsModal = document.getElementById('docsLinkModal');
+        const closeDocsBtn = document.getElementById('closeDocsModal');
+        
+        closeDocsBtn?.addEventListener('click', () => {
+            docsModal.style.display = 'none';
+        });
+
+        // Make docs accessible through the UI
+        window.openDocs = () => {
+            window.location.href = 'docs.html';
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service - InnerOrbit</title>
+    <link rel="icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <link rel="shortcut icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --sidebar-bg: #1e293b;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --primary: #fb7185;
+            --accent: #c084fc;
+            --card-bg: rgba(30, 41, 59, 0.5);
+            --border: rgba(255, 255, 255, 0.1);
+            --sidebar-width: 300px;
+        }
+
+        [data-theme="light"] {
+            --bg-color: #f8fafc;
+            --sidebar-bg: #e2e8f0;
+            --text-color: #1e293b;
+            --text-muted: #64748b;
+            --primary: #e11d48;
+            --accent: #9333ea;
+            --card-bg: rgba(255, 255, 255, 0.8);
+            --border: rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+
+        /* Layout Grid */
+        .layout-container {
+            display: grid;
+            grid-template-columns: var(--sidebar-width) 1fr;
+            min-height: 100vh;
+        }
+
+        /* Sidebar Styling */
+        .sidebar {
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border);
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            overflow-y: auto;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            
+            scrollbar-width: thin;
+            scrollbar-color: var(--border) transparent;
+        }
+
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .brand {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--text-color);
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            text-decoration: none;
+        }
+
+        .nav-links {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .nav-item {
+            display: block;
+            padding: 8px 12px;
+            color: var(--text-muted);
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            border-left: 2px solid transparent;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            color: var(--primary);
+            background: rgba(251, 113, 133, 0.1);
+            border-left-color: var(--primary);
+        }
+
+        .main-content {
+            padding: 3rem 4rem;
+            max-width: 900px;
+        }
+
+        header {
+            margin-bottom: 3rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--text-color) 0%, var(--text-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        h2 {
+            color: var(--primary);
+            font-size: 1.5rem;
+            margin-top: 3rem;
+            margin-bottom: 1rem;
+            scroll-margin-top: 2rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem;
+        }
+
+        h3 {
+            color: var(--text-color);
+            font-size: 1.1rem;
+            margin: 1.5rem 0 0.75rem;
+            font-weight: 600;
+        }
+
+        p, li {
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        ul { padding-left: 1.5rem; }
+
+        .alert-box {
+            background: rgba(251, 113, 133, 0.1);
+            border-left: 4px solid var(--primary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 2rem 0;
+            color: var(--text-color);
+        }
+
+         a { color: var(--primary); text-decoration: none; }
+         a:hover { color: var(--accent); text-decoration: underline; }
+
+        /* Mobile Toggle */
+        .mobile-toggle {
+            display: none;
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
+        @media (max-width: 900px) {
+            .layout-container { grid-template-columns: 1fr; }
+            .sidebar {
+                display: none;
+                position: fixed;
+                z-index: 999;
+                width: 280px;
+                box-shadow: 2px 0 20px rgba(0,0,0,0.5);
+            }
+            .sidebar.open { display: flex; }
+            .main-content { padding: 2rem; }
+            .mobile-toggle { display: flex; align-items: center; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+
+    <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
+
+    <div class="layout-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <a href="index.html" class="brand">← InnerOrbit</a>
+            <div class="nav-links">
+                <a href="#acceptance" class="nav-item">1. Acceptance of Terms</a>
+                <a href="#account" class="nav-item">2. Account Registration</a>
+                <a href="#usage" class="nav-item">3. Acceptable Use Policy</a>
+                <a href="#content" class="nav-item">4. User Content</a>
+                <a href="#ip" class="nav-item">5. Intellectual Property</a>
+                <a href="#privacy" class="nav-item">6. Privacy & Data</a>
+                <a href="#encryption" class="nav-item">7. End-to-End Encryption</a>
+                <a href="#stealth" class="nav-item">8. Stealth Features</a>
+                <a href="#payments" class="nav-item">9. Payments</a>
+                <a href="#disclaimers" class="nav-item">10. Disclaimers</a>
+                <a href="#indemnification" class="nav-item">11. Indemnification</a>
+                <a href="#export" class="nav-item">12. Export Control</a>
+                <a href="#governing" class="nav-item">13. Governing Law</a>
+                <a href="#dmca" class="nav-item">14. DMCA Copryight</a>
+                <a href="#disputes" class="nav-item">16. Dispute Resolution</a>
+                <a href="#contact" class="nav-item">18. Contact Info</a>
+                <a href="privacy-policy.html" class="nav-item" style="margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem;">View Privacy Policy</a>
+            </div>
+             <div style="margin-top: auto; padding-top: 2rem; font-size: 0.8rem; color: var(--text-muted);">
+                &copy; 2026 InnerOrbit
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header>
+                <h1>Terms of Service</h1>
+                <p>Last Updated: January 19, 2026 &bull; Effective Date: January 19, 2026</p>
+            </header>
+
+            <div class="alert-box">
+                <strong>Important:</strong> These Terms include a binding arbitration agreement and class action waiver for U.S. users. Please read Section 16 carefully.
+            </div>
+
+            <section>
+                 <div class="alert-box" style="margin-top: 0; background: rgba(255,255,255,0.05); border-left: 4px solid var(--text-color);">
+                    <strong>Agreement to Terms:</strong> By accessing or using InnerOrbit ("the App," "Service," "we," "our," or "us"), you agree to be bound by these Terms of Service ("Terms"). If you do not agree to these Terms, do not use the App.
+                </div>
+                <p>InnerOrbit is operated as an individual developer project.</p>
+            </section>
+
+            <section id="acceptance">
+                <h2>1. Acceptance of Terms</h2>
+                
+                <h3>1.1 Binding Agreement</h3>
+                <p>These Terms constitute a legally binding agreement between you ("User," "you," or "your") and InnerOrbit (Individual Developer). By creating an account, accessing the App, or using any features or services, you acknowledge that you have read, understood, and agree to be bound by these Terms and our Privacy Policy.</p>
+                
+                <h3>1.2 Age Requirements</h3>
+                <p><strong>You must be at least 13 years old</strong> (or 16 in the European Economic Area) to use InnerOrbit.</p>
+                <p>By using the App, you represent and warrant that:</p>
+                <ul>
+                    <li>You are at least 13 years old (or 16 in the EEA)</li>
+                    <li>You have the legal capacity to enter into this agreement</li>
+                    <li>You are not prohibited from using the Service under applicable law</li>
+                </ul>
+                <p><strong>Parental Consent:</strong> If you are between 13-18 (or 16-18 in EEA), you must have your parent or legal guardian's permission to use the App.</p>
+
+                <h3>1.3 Changes to Terms</h3>
+                <p>We reserve the right to modify these Terms at any time. Changes will be posted on this page with a new "Last Updated" date, notified via in-app alert for material changes, and effective immediately upon posting.</p>
+                <p><strong>Your continued use after changes constitutes acceptance.</strong> If you do not agree to the modified Terms, you must stop using the App.</p>
+            </section>
+
+            <section id="account">
+                <h2>2. Account Registration and Security</h2>
+                
+                <h3>2.1 Account Creation</h3>
+                <p>To use InnerOrbit, you must create an account by providing a valid email address and secure password. You will receive a 4-digit User ID (for PIN login) and a 6-digit Recovery PIN (encrypted).</p>
+
+                <h3>2.2 Account Security</h3>
+                <p>You are responsible for maintaining the confidentiality of your password and PIN, all activities that occur under your account, and notifying us immediately of any unauthorized access.</p>
+                <p><strong>We are not liable for any loss or damage from your failure to protect your account.</strong></p>
+
+                <h3>2.3 Account Restrictions</h3>
+                <p>You may not create multiple accounts for the same person, share your account with others, use another person's account without permission, create an account using false or misleading information, or create an account if you were previously banned.</p>
+
+                <h3>2.4 Account Termination</h3>
+                <p><strong>By You:</strong> You may delete your account at any time via Settings &rarr; Account &rarr; Delete Account. Deletion is permanent and cannot be undone. All your data will be deleted within 30 days.</p>
+                <p><strong>By Us:</strong> We may suspend or terminate your account if you violate these Terms, terminate accounts that are inactive for 12+ months, or terminate the Service entirely with 30 days' notice.</p>
+            </section>
+
+            <section id="usage">
+                <h2>3. Acceptable Use Policy</h2>
+                
+                <h3>3.1 Permitted Uses</h3>
+                <p>InnerOrbit is designed for private, secure messaging, sharing photos and media with contacts, using stealth features (calculator mode, games), and personal communication.</p>
+
+                <h3>3.2 Prohibited Activities</h3>
+                <p>You may NOT use InnerOrbit to:</p>
+                <ul>
+                    <li><strong>Illegal Activities:</strong> Violate laws, engage in illegal acts, distribute illegal content, or facilitate fraud.</li>
+                    <li><strong>Harmful Content:</strong> Harass, threaten, hate speech, explicit content involving minors, or distribute malware.</li>
+                    <li><strong>Abuse and Spam:</strong> Send spam, impersonate others, phishing, or create fake accounts.</li>
+                    <li><strong>Intellectual Property Violations:</strong> Infringe on copyrights/trademarks, share pirated content, or violate privacy rights.</li>
+                    <li><strong>Platform Abuse:</strong> Hack, reverse engineer, scrape data, or interfere with operations.</li>
+                </ul>
+
+                <h3>3.3 Enforcement</h3>
+                <p>Violations may result in warning, suspension, permanent termination, reporting to law enforcement, or legal action.</p>
+            </section>
+
+            <section id="content">
+                <h2>4. User Content</h2>
+                <h3>4.1 Your Content</h3>
+                <p>"User Content" means any messages, photos, media, or information you submit. <strong>You retain ownership</strong> of your User Content.</p>
+
+                <h3>4.2 License to Us</h3>
+                <p>By posting User Content, you grant InnerOrbit a non-exclusive, worldwide, royalty-free license to store, transmit, and display your content <strong>solely for the purpose of providing the Service</strong>. We do NOT claim ownership, use content for ads, or share with third parties (except as required).</p>
+
+                <h3>4.3 Content Responsibility</h3>
+                <p>You are solely responsible for your User Content. You warrant that you own rights to content and it violates no laws or rights. <strong>We are not responsible for User Content.</strong></p>
+
+                <h3>4.4 Content Removal</h3>
+                <p>We reserve the right to remove content violating these Terms or legal requests. We are not obligated to monitor content.</p>
+            </section>
+
+            <section id="ip">
+                <h2>5. Intellectual Property Rights</h2>
+                <h3>5.1 Our Rights & Limited License</h3>
+                <p>InnerOrbit and related materials are owned by InnerOrbit Team. We grant you a limited, non-exclusive, revocable license to use the App for personal, non-commercial purposes. You may NOT copy, modify, reverse engineer, or use our trademarks without permission.</p>
+
+                <h3>5.2 Feedback</h3>
+                <p>If you provide feedback, we may use it without obligation to you.</p>
+            </section>
+
+            <section id="privacy">
+                <h2>6. Privacy and Data Protection</h2>
+                <p>Your use of InnerOrbit is governed by our <a href="privacy-policy.html">Privacy Policy</a>.</p>
+                <h3>Key Privacy Features:</h3>
+                <ul>
+                    <li>End-to-end encryption for all messages</li>
+                    <li>No message content access by InnerOrbit</li>
+                    <li>Minimal data collection & User control over data</li>
+                </ul>
+                <p><strong>Data Security:</strong> We implement industry-standard measures, but no system is 100% secure. You use the App at your own risk.</p>
+                <p><strong>Third-Party Services:</strong> We use Firebase/Google Cloud (their privacy policies apply).</p>
+            </section>
+
+            <section id="encryption">
+                <h2>7. End-to-End Encryption</h2>
+                <p><strong>Encryption Notice:</strong> Only you and your recipient can read messages. InnerOrbit cannot access message content. Messages are encrypted on your device.</p>
+                <p><strong>Limitations:</strong> We cannot recover lost messages, provide content to law enforcement (we don't have access), or decrypt messages if credentials are lost.</p>
+                <p><strong>Backup:</strong> Encrypted messages are stored on Firebase servers. No backup to third-party services supported.</p>
+            </section>
+
+            <section id="stealth">
+                <h2>8. Stealth Features</h2>
+                <p><strong>Calculator Mode:</strong> Disguises app as calculator; requires PIN for access.</p>
+                <p><strong>Decoy PIN:</strong> Opens empty account for emergencies (optional).</p>
+                <p><strong>Intended Use:</strong> Personal privacy and protection. <strong>Prohibited:</strong> Evading lawful surveillance or hiding illegal activities.</p>
+            </section>
+
+            <section id="payments">
+                <h2>9. Payments and Subscriptions</h2>
+                <p>InnerOrbit is currently <strong>free</strong>. We reserve the right to introduce paid features with 30 days' notice.</p>
+            </section>
+
+            <section id="disclaimers">
+                <h2>10. Disclaimers and Limitations</h2>
+                <p>THE SERVICE IS PROVIDED "AS IS" WITHOUT WARRANTIES. We do not guarantee absolute security.</p>
+                <p><strong>Limitation of Liability:</strong> To the maximum extent permitted by law, InnerOrbit is not liable for indirect damages or data loss. Total liability is limited to $100 USD.</p>
+            </section>
+
+            <section id="indemnification">
+                <h2>11. Indemnification</h2>
+                <p>You agree to indemnify and hold harmless InnerOrbit from claims arising from your use of the App, User Content, or violation of these Terms.</p>
+            </section>
+            
+            <section id="export">
+                <h2>12. Export Control</h2>
+                <p>You represent you are not in a prohibited country (e.g., Cuba, Iran, North Korea, Syria) or on any U.S. government prohibited list.</p>
+            </section>
+
+            <section id="governing">
+                <h2>13. Governing Law</h2>
+                <p>These Terms are governed by the laws of your country of residence.</p>
+            </section>
+
+            <section id="dmca">
+                <h2>14. DMCA Copyright Policy</h2>
+                <p>Send copyright infringement notices to <a href="mailto:dmca@InnerOrbit.app">dmca@InnerOrbit.app</a>.</p>
+            </section>
+            
+            <section id="disputes">
+                <h2>16. Dispute Resolution (U.S. Users)</h2>
+                <p><strong>Arbitration:</strong> U.S. users agree to resolve disputes through binding arbitration (AAA), not in court. You waive your right to class actions.</p>
+                <p><strong>Opt-Out:</strong> Email <a href="mailto:arbitration-opt-out@InnerOrbit.app">arbitration-opt-out@InnerOrbit.app</a> within 30 days to opt-out.</p>
+            </section>
+
+            <section id="contact">
+                <h2>18. Contact Information</h2>
+                <p>Email: <a href="mailto:legal@InnerOrbit.app">legal@InnerOrbit.app</a><br>
+                Support: <a href="mailto:support@InnerOrbit.app">support@InnerOrbit.app</a></p>
+            </section>
+            
+            <section>
+                <h2>Acknowledgment</h2>
+                <p>BY USING InnerOrbit, YOU ACKNOWLEDGE THAT YOU HAVE READ, UNDERSTOOD, AND AGREE TO BE BOUND BY THESE TERMS.</p>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        // Smooth Scroll & Spy
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                document.querySelector(this.getAttribute('href')).scrollIntoView({ behavior: 'smooth' });
+                document.querySelector('.sidebar').classList.remove('open');
+            });
+        });
+
+        window.addEventListener('scroll', () => {
+            const sections = document.querySelectorAll('section');
+            const navItems = document.querySelectorAll('.nav-item');
+            let current = '';
+            sections.forEach(section => {
+                if (pageYOffset >= section.offsetTop - 150) current = section.getAttribute('id');
+            });
+            navItems.forEach(item => {
+                item.classList.remove('active');
+                if (item.getAttribute('href').includes(current)) item.classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

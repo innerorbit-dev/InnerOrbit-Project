@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Portal & Metadata (Public)
+    match /portal_passwords/{hash} { 
+      allow get: if true; 
+    }
+    match /portal_access_logs/{logId} { 
+      allow create: if true; 
+    }
+    
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

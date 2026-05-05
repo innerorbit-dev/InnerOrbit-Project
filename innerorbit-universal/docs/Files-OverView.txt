@@ -1,0 +1,140 @@
+INNERORBIT PROJECT FILES OVERVIEW AND ARCHITECTURE
+
+This document provides a breakdown of the codebase, categorizing files into Frontend and Backend/Integration roles, and explains the Firebase integration architecture.
+
+1. ARCHITECTURE SUMMARY
+
+This application uses a Serverless Architecture.
+- Frontend: Built with React Native (Expo) for Mobile and Web.
+- Backend: There is no dedicated Node.js server to deploy. The Backend is fully managed by Firebase (Google's backend-as-a-service platform).
+- Integration: The application connects directly to Firebase services (Firestore, Auth, Storage) via the Firebase JS SDK, wrapped in service modules located in the lib/ directory.
+
+2. FILE CLASSIFICATION
+
+A. FRONTEND (UI, Navigation, State)
+These files are responsible for what the user sees and interacts with.
+
+   /app (Expo Router - Navigation Logic)
+     _layout.js: Main entry point, sets up Providers (Auth, Theme, Network).
+     index.js: Landing page / logic to redirect to Login or Home.
+     login.js, signup.js: Authentication screens.
+     home.js: Main private screen (Chat List).
+     CalcX.js: The Stealth Calculator interface.
+     game/[id].js: Dynamic route for games (Ludo, etc.).
+
+   /components (Reusable UI Elements)
+     ChatList.js, ChatDetail.js: UI for messaging.
+     Calculator.js: The comprehensive calculator logic and UI.
+     LudoGame.js, TicTacToeGame.js: Game implementations.
+     FabMenu.js: Floating action menu for game switching.
+
+   /context (Global State Management)
+     auth-context.js: Manages user login state vs. Decoy Mode state.
+     theme-context.js: Handles Dark/Light mode switching.
+     network-context.js: Monitors internet connectivity.
+
+B. BACKEND INTERFACE (Service Layer)
+These files technically run on the Frontend device but serve as the Backend Connector. They replace the traditional API routes you might find in a REST server.
+
+   /lib (Service Modules)
+     firebase.js: The Bridge. Initializes the connection to Firebase using API keys.
+     firestore-service.js: The Database API. Contains functions to Read/Write data (e.g., sendMessage, createUserProfile).
+     auth-service.js: Helper functions for custom auth (PIN login logic).
+     secure-storage-service.js: Manages encrypted local storage of credentials (keychain/keystore).
+     notification-service.js: Handles Push Notifications via Firebase Cloud Messaging (FCM).
+
+3. FIREBASE INTEGRATION DETAILS
+
+The Backend is composed of three main Firebase services, integrated as follows:
+
+   1. Authentication (Firebase Auth)
+   File: lib/firebase.js, context/auth-context.js
+   Integration:
+     The app uses firebase.auth() authentication.
+     Standard Login (Email/Password) and Google Sign-In talk directly to Firebase servers to return a User Token.
+     PIN Login: This is a custom logic in auth-context.js. It validates a 6-digit PIN against the users collection in Firestore without needing a full Firebase Re-auth.
+
+   2. Database (Cloud Firestore)
+   File: lib/firestore-service.js
+   Integration:
+     The app uses a NoSQL document structure (users, conversations).
+     Real-time: The app uses onSnapshot listeners to maintain a live connection. When data changes on the Firebase Backend, these listeners instantly update the Frontend UI without manual refreshing.
+     CRUD Operations: React components call exported functions like sendMessage() or markMessageAsRead(), which execute addDoc or updateDoc commands against the remote database.
+
+   3. File Storage (Firebase Storage)
+   File: lib/firebase.js
+   Integration:
+     Used for Profile Pictures and Chat Image attachments.
+     Images are uploaded as Blobs directly from the device to Firebase Storage buckets.
+     The resulting Download URL is stored in Firestore messages to be displayed in the Chat UI.
+
+4. DATA FLOW EXAMPLES
+
+Practical walkthroughs of common user actions showing the link between Frontend and Backend processes.
+
+   Scenario A: User Sends a Message
+   1. Frontend: User types text in ChatDetail.js and hits Send.
+   2. Action: ChatDetail.js calls sendMessage() (imported from lib/firestore-service.js).
+   3. Backend Interface: sendMessage() constructs a data object and calls standard Firebase addDoc() to write to the messages collection in the cloud.
+   4. Backend Processing: Firebase accepts the write (if security rules pass).
+   5. Consumption (Real-time):
+      The recipient's app has an onSnapshot() listener active in their ChatDetail.js.
+      Firebase pushes the new message data to that listener instantly.
+      The React state updates, and the new message appears on the screen.
+
+   Scenario B: User Creates an Account (Sign Up)
+   1. Frontend: User enters Email/Password in signup.js forms and clicks Sign Up.
+   2. Action: signup.js calls signUp(email, password) from context/auth-context.js.
+   3. Auth Process: auth-context calls firebase.auth().createUserWithEmailAndPassword().
+      Backend: Firebase Auth server verifies the request and creates a unique uid.
+   4. Profile Creation: Upon success, auth-context immediately calls createUserProfile(user) from lib/firestore-service.js.
+      Backend Interface: createUserProfile runs a Firestore Transaction to generate a unique 4-digit User ID and 6-digit PIN.
+      Backend: Firestore writes a new document to the users collection with this metadata.
+   5. State Update: The AuthContext detects the new user object and updates the global user state, redirecting the App Navigation (_layout.js) to the Home screen.
+
+   Scenario C: User Logs In (Standard)
+   1. Frontend: User enters Credentials in login.js avoiding the Stealth fake errors.
+   2. Action: login.js calls signIn(email, password) from context/auth-context.js.
+   3. Auth Process: auth-context calls firebase.auth().signInWithEmailAndPassword().
+      Backend: Firebase Auth validates the hash and returns a session token.
+   4. State Update:
+      auth.onAuthStateChanged listener in AuthProvider fires.
+      Global user state is set to the logged-in user.
+      isDecoyMode is set to false (Unlocking the app).
+   5. Navigation: _layout.js observes user is present and isDecoyMode is false, so it navigates from login to home.
+
+   Scenario D: User Changes Settings (Controls)
+
+   Sub-Scenario D1: Changing a Local Setting (e.g., Theme/Dark Mode)
+   1. Frontend: User toggles Dark Mode in Settings.js.
+   2. Action: Calls toggleTheme() from context/theme-context.js.
+   3. Processing:
+      theme-context updates the React State (immediate UI change).
+      It also calls AsyncStorage.setItem('theme', 'dark').
+   4. Result: This data stays Local Only on the device. No backend communication occurs.
+
+   Sub-Scenario D2: Changing a Server Setting (e.g., Bio or Profile Pickup)
+   1. Frontend: User edits their Bio in Settings.js and clicks Save.
+   2. Action: Settings.js calls updateUserProfile(uid, { bio: newText }) from lib/firestore-service.js.
+   3. Backend Interface: updateUserProfile calls setDoc(..., { merge: true }) targeting the specific document in the users Firestore collection.
+   4. Backend Processing: Firestore updates the document in the cloud.
+   5. Reflection: Any other user viewing this profile (e.g., in a Chat) who has a subscribeToUserProfile listener active will see the new Bio update instantly.
+   - [ ] No console errors related to CSP
+
+---
+
+## 5. FUTURE INFRASTRUCTURE (R&D)
+
+The following components are currently in development/research phase:
+
+- **oracle-server-backend/**: Future Oracle-based backend.
+  - **Status**: R&D. Currently used for frontend verification and future backend (preparation).
+
+---
+
+## 6. SECURITY AUDIT GUIDELINES
+
+When auditing the encryption system, always refer to the [ENCRYPTION_GUIDE.md](./ENCRYPTION_GUIDE.md) for protocol specifications.
+- **KDF Invariance**: Never modify the Key Derivation Function of existing levels.
+- **Recovery Engine**: Any new decryption logic must be added as a prioritized Strategy to prevent locking existing data.
+- **Platform Parity**: Verify that any core crypto change is shimmed correctly for both Web (CryptoJS/Noble) and Native (Expo).

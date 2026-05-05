@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>No Internet Connection | InnerOrbit</title>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/webp" href="assets/favicons/error-favicon.svg">
+    <link rel="alternate icon" type="image/png" href="assets/logos/innerorbit-logo.png">
+    
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #020617; /* Slate 950 */
+            color: #f8fafc;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        .container {
+            position: relative;
+            z-index: 10;
+            padding: 2rem;
+            max-width: 500px;
+        }
+
+        /* Glitchy Effect for Title */
+        h1 {
+            font-size: 3rem;
+            font-weight: 800;
+            margin-bottom: 1rem;
+            color: #ef4444; /* Red 500 */
+            text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+        }
+
+        p {
+            font-size: 1.1rem;
+            color: #94a3b8; /* Slate 400 */
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+
+        /* Animated Signal SVG */
+        .signal-svg {
+            width: 120px;
+            height: 120px;
+            margin-bottom: 1.5rem;
+        }
+        
+        .signal-dish {
+            fill: none;
+            stroke: #ef4444;
+            stroke-width: 4;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        .signal-wave {
+            fill: none;
+            stroke: #ef4444;
+            stroke-width: 4;
+            stroke-linecap: round;
+            opacity: 0;
+            transform-origin: center;
+            animation: ripple 2s infinite linear;
+        }
+
+        .signal-wave:nth-child(2) { animation-delay: 0.5s; }
+        .signal-wave:nth-child(3) { animation-delay: 1.0s; }
+
+        @keyframes ripple {
+            0% { opacity: 0; transform: scale(0.5); }
+            50% { opacity: 1; }
+            100% { opacity: 0; transform: scale(1.5); }
+        }
+
+        .icon-wrapper {
+            display: flex;
+            justify-content: center;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 12px 32px;
+            font-size: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: 600;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        /* Background Animation */
+        .bg-mesh {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            opacity: 0.1;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="bg-mesh"></div>
+
+    <div class="container">
+        <div class="icon-wrapper">
+            <!-- Animated SVG: Satellite Signal Lost -->
+            <svg class="signal-svg" viewBox="0 0 100 100">
+                <!-- Central Tower/Dish -->
+                <path class="signal-dish" d="M50 80 L50 50 M30 80 L70 80 M50 50 L35 35 M50 50 L65 35" />
+                <circle class="signal-dish" cx="50" cy="25" r="5" />
+                
+                <!-- Emitting Waves -->
+                <circle class="signal-wave" cx="50" cy="25" r="15" />
+                <circle class="signal-wave" cx="50" cy="25" r="25" />
+                <circle class="signal-wave" cx="50" cy="25" r="35" />
+            </svg>
+        </div>
+        <h1>CONNECTION LOST</h1>
+        <p>
+            Your system has lost communication with the network. <br>
+            Please check your internet connection to access the portal.
+        </p>
+        
+        <button id="retryBtn" class="btn">Retry Connection</button>
+        <div id="status" style="margin-top: 20px; font-size: 0.9rem; color: #64748b; min-height: 20px;"></div>
+    </div>
+
+    <script>
+        // Check for saved return URL
+        const returnUrl = sessionStorage.getItem('lastPage') || '/';
+        
+        let countdownInterval;
+        let nextRetryTime = Date.now() + 5000;
+        const AUTO_RETRY_DELAY = 5000;
+
+        function startCountdown() {
+            if (countdownInterval) clearInterval(countdownInterval);
+            
+            // Set next retry time
+            nextRetryTime = Date.now() + AUTO_RETRY_DELAY;
+            
+            const statusDiv = document.getElementById('status');
+            
+            countdownInterval = setInterval(() => {
+                const remaining = Math.ceil((nextRetryTime - Date.now()) / 1000);
+                
+                if (remaining <= 0) {
+                    clearInterval(countdownInterval);
+                    checkConnection(true); // true = isAuto
+                } else {
+                    statusDiv.textContent = `Auto-retrying in ${remaining}s...`;
+                    statusDiv.style.color = "#64748b";
+                }
+            }, 1000);
+        }
+
+        function checkConnection(isAuto = false) {
+            // Stop countdown if manual check
+            if (!isAuto) {
+                if (countdownInterval) clearInterval(countdownInterval);
+            }
+
+            const statusDiv = document.getElementById('status');
+            const btn = document.getElementById('retryBtn');
+            
+            statusDiv.textContent = "Pinging server...";
+            statusDiv.style.color = "#fbbf24";
+            
+            // Visual feedback on button
+            const originalBtnText = btn.textContent;
+            btn.textContent = "Checking...";
+            btn.style.opacity = "0.7";
+            btn.disabled = true;
+
+            fetch('/', { method: 'HEAD', cache: 'no-store' })
+                .then(response => {
+                    if (response.ok) {
+                        statusDiv.textContent = "Connection restored! Redirecting...";
+                        statusDiv.style.color = "#4ade80";
+                        setTimeout(() => {
+                            window.location.href = returnUrl;
+                        }, 500);
+                    } else {
+                        throw new Error('Server unreachable');
+                    }
+                })
+                .catch(() => {
+                    const time = new Date().toLocaleTimeString();
+                    // statusDiv.textContent = `Still offline. Retrying in 5s... (${time})`;
+                    statusDiv.style.color = "#ef4444";
+                    
+                    // Reset button
+                    btn.textContent = "Try Again Now";
+                    btn.style.opacity = "1";
+                    btn.disabled = false;
+                    
+                    // Restart auto-countdown
+                    startCountdown();
+                });
+        }
+
+        // Initial Start
+        startCountdown();
+
+        // Immediate check on button click
+        document.getElementById('retryBtn').addEventListener('click', () => checkConnection(false));
+
+        // Browser online event
+        window.addEventListener('online', () => checkConnection(false));
+    </script>
+
+</body>
+</html>

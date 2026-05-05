@@ -1,0 +1,31 @@
+node_modules
+# Expo
+.expo/
+dist/
+web-build/
+.firebase/
+portal-dist/
+coverage/
+
+# Native
+android/
+ios/
+.gradle/
+build/
+
+# System
+.env
+google-services.json
+GoogleService-Info.plist
+.DS_Store
+*.log
+
+# Sensitive Documentation (contains credentials, deployment info, live URLs)
+docs-sensitive/
+
+# Documentation (Kept separate from code)
+*.md
+
+
+# Sensitive files in download-portal (if any remain)
+download-portal/

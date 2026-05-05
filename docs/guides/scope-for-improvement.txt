@@ -1,0 +1,4 @@
+Scope for Improvement
+
+- TypeScript Migration : The codebase currently uses plain JavaScript. Converting to TypeScript would provide better type safety and help prevent runtime errors.
+- Component Refactoring : Large components like Calculator.js could be decomposed into smaller, memoized sub-components to improve readability and rendering performance.

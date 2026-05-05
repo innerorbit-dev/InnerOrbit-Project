@@ -1,0 +1,67 @@
+Here's how to test the update feature:
+
+Testing the Update Walkthrough
+1. Test the Intro Slides (Easiest)
+
+The walkthrough appears when the app detects a new version. To trigger it:
+
+javascript
+// In your browser console or by clearing AsyncStorage
+AsyncStorage.removeItem('last_viewed_version');
+// Then reload the app
+Or manually:
+
+Open Settings → Updates & Release
+The current version is displayed as v1.1.0
+Clear your browser's Application → Local Storage for the site
+Reload the page - the walkthrough should appear automatically
+2. Test the Settings Page
+
+Navigate to Settings → Updates & Release to see:
+
+Current version display (v1.1.0)
+"Check for Updates" button
+Auto-update preferences (Wi-Fi only, etc. for mobile OR auto-download toggle for desktop)
+3. Simulate a Version Update
+
+To test the full flow:
+
+Analyzed
+update-manager.js#L1-128
+Step-by-step testing guide:
+
+Quick Test (Walkthrough Only)
+Open Browser DevTools (F12)
+Go to Application → Storage → Local Storage
+Find and delete the key last_viewed_version
+Reload the page - The walkthrough should appear with 3 slides
+Full Version Update Test
+Change the version in 
+lib/update-manager.js
+ line 12:
+javascript
+const CURRENT_VERSION = "1.2.0"; // Changed from 1.1.0
+Reload the app - The walkthrough will appear because 1.2.0 ≠ 1.1.0
+Go through the slides and click "Finish"
+Check Settings → Updates & Release - Should now show v1.2.0
+Reload again - Walkthrough should NOT appear (version already viewed)
+Test Update Preferences
+On Web/Desktop:
+
+Toggle "Auto-Download Updates" ON/OFF
+Toggle "Metered Connections" ON/OFF
+Preferences save to AsyncStorage
+On Mobile (if testing on device):
+
+Select "Wi-Fi Only", "Wi-Fi and Mobile Data", or "Mobile Data Only"
+Check AsyncStorage to verify the preference is saved
+Test Manual Check Button
+Click "Check for Updates" in Settings:
+
+Web: Triggers window.location.reload()
+Mobile (DEV mode): Shows "Updates disabled in DEV mode"
+Mobile (Production): Calls expo-updates API
+Note: In development mode (__DEV__), the actual update check is disabled (line 73-76) to prevent conflicts with Metro bundler. You'll need a production build to test real OTA updates.
+
+Would you like me to create a simple test script to automate version changes for easier testing? 🚀
+

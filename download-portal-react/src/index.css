@@ -1,0 +1,374 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+    /* Unified Tech Theme Palette */
+    --tech-bg: #0b1120; /* Deep Code Blue/Black */
+    --tech-surface: #1e293b;
+    --tech-grid: rgba(99, 102, 241, 0.15); /* Indigo tint for patterns */
+    
+    /* Using these for universal variables */
+    --bg-primary: var(--tech-bg);
+    --bg-secondary: var(--tech-surface);
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1; /* Lighter grey for better dark mode visibility */
+    --accent-cyan: #06b6d4;
+    --accent-purple: #a855f7;
+    --border-color: rgba(255, 255, 255, 0.1);
+    
+    /* Unified Section Background Bases */
+    --bg-social: var(--tech-bg);
+    --bg-features: var(--tech-bg);
+    --bg-download: var(--tech-bg);
+    --bg-footer: #020617;
+    
+    /* Card Variables for Visibility */
+    --card-bg: rgba(2, 6, 23, 0.8); /* Deep black-blue, no milky look */
+    --card-bg-hover: rgba(2, 6, 23, 0.95);
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        /* Keep system preference if no override */
+        --bg-primary: #f8fafc;
+        /* ... (rest of vars will be handled by the override below if strictly needed, but let's just make the class the source of truth) */
+    }
+}
+
+/* Enable manual light mode via data attribute */
+:root[data-theme="light"] {
+    /* Tech Light Theme */
+    --tech-bg: #f0f4f8; 
+    --tech-surface: #ffffff;
+    --tech-grid: rgba(99, 102, 241, 0.08);
+
+    --bg-primary: var(--tech-bg);
+    --bg-secondary: var(--tech-surface);
+    --text-primary: #0f172a;
+    --text-secondary: #334155; /* Darker grey for better light mode visibility */
+    --border-color: rgba(0, 0, 0, 0.1);
+    
+    --bg-social: var(--tech-bg);
+    --bg-features: var(--tech-bg);
+    --bg-download: var(--tech-bg);
+    --bg-footer: #e2e8f0;
+    
+    /* Card Variables for Light Mode (Dark glass on light bg) */
+    --card-bg: rgba(15, 23, 42, 0.03); /* Subtle dark tint, NOT white */
+    --card-bg-hover: rgba(15, 23, 42, 0.06);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* --- HOVER ANIMATIONS --- */
+.hover-scale {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s ease;
+}
+.hover-scale:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.3);
+}
+
+.icon-hover {
+    transition: transform 0.3s ease, color 0.3s ease;
+}
+.icon-hover:hover {
+    transform: scale(1.1) rotate(5deg);
+    color: var(--accent-cyan);
+}
+
+/* --- REFINED SECTION DESIGNS (PRO & SIMPLE) --- */
+
+/* --- REFINED SECTION DESIGNS (Official & Professional) --- */
+
+/* Hero: Professional Static Gradient (No circular motion) */
+.bg-hero {
+    position: relative;
+    background: var(--bg-primary);
+    background-image: 
+        radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(6, 182, 212, 0.15) 0px, transparent 50%);
+    overflow: hidden;
+    z-index: 1;
+}
+.bg-hero::before {
+    /* Optional subtle noise texture for "premium" feel */
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.4;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    z-index: -1;
+    pointer-events: none;
+    mix-blend-mode: overlay;
+}
+/* Removed @keyframes rotateHero */
+
+/* Social Privacy: "Soft Bokeh" (No Grid) */
+.bg-social {
+    background-color: var(--tech-bg);
+    /* Large, diffuse ambient light orbs */
+    background-image: 
+        radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 25%),
+        radial-gradient(circle at 85% 30%, rgba(6, 182, 212, 0.08) 0%, transparent 25%);
+    background-size: 100% 100%;
+    position: relative;
+    /* No borders - Seamless flow */
+}
+.bg-social::after { display: none; }
+
+/* Features: Clean Deep Space */
+.bg-features {
+    background-color: var(--tech-bg);
+    /* Subtle vertical vignette */
+    background-image: linear-gradient(to bottom, rgba(0,0,0,0.2), transparent 15%, transparent 85%, rgba(0,0,0,0.2));
+    position: relative;
+}
+
+/* Download: "Spotlight" / Horizon */
+.bg-download {
+    background-color: var(--tech-bg);
+    /* Top-down subtle beam */
+    background-image: radial-gradient(ellipse at top, rgba(6, 182, 212, 0.1), transparent 70%);
+    position: relative;
+}
+.bg-download::before { display: none; }
+
+/* Footer: Simple Clean (No Border) */
+.bg-footer {
+    background-color: var(--bg-footer);
+    color: var(--text-secondary);
+    /* Subtle shadow separator instead of line */
+    box-shadow: 0 -10px 40px -10px rgba(0,0,0,0.3);
+}
+
+/* Footer: Solid with subtle top highlight */
+.bg-footer {
+    background-color: var(--bg-footer);
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border-color);
+}
+
+/* Card Styles: Enhanced Glassmorphism & Visibility */
+.comparison-card, .feature-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 20px;
+    padding: 2.5rem;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Spring-like smoother */
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+}
+
+.comparison-card:hover, .feature-card:hover {
+    border-color: var(--accent-cyan);
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 
+        0 20px 25px -5px rgba(0, 0, 0, 0.1), 
+        0 8px 10px -6px rgba(0, 0, 0, 0.1),
+        0 0 15px rgba(6, 182, 212, 0.15); /* Glow */
+    background: var(--card-bg-hover);
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text-primary);
+    overflow-x: hidden;
+    min-height: 100vh;
+    background: var(--bg-primary);
+}
+
+/* --- LOGIN PAGE STYLES (from index.html) --- */
+.page-login {
+    background: #000000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    position: relative;
+}
+
+/* Animated Tech Background Layers (Login) */
+.page-login::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: 
+        radial-gradient(ellipse at 20% 80%, rgba(234, 88, 12, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.2) 0%, transparent 50%),
+        radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.8) 0%, #000000 100%);
+    z-index: 0;
+    pointer-events: none;
+}
+
+.page-login::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg width='1920' height='1080' xmlns='http://www.w3.org/2000/svg'%3E%3Cdefs%3E%3ClinearGradient id='purpleGrad' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' style='stop-color:%23a855f7;stop-opacity:0.6'/%3E%3Cstop offset='100%25' style='stop-color:%23ec4899;stop-opacity:0.4'/%3E%3C/linearGradient%3E%3ClinearGradient id='orangeGrad' x1='0%25' y1='100%25' x2='100%25' y2='0%25'%3E%3Cstop offset='0%25' style='stop-color:%23f59e0b;stop-opacity:0.5'/%3E%3Cstop offset='100%25' style='stop-color:%23ea580c;stop-opacity:0.6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M0,800 Q400,600 800,700 T1600,650 L1920,1080 L0,1080 Z' fill='url(%23purpleGrad)' opacity='0.3'/%3E%3Cpath d='M0,900 Q300,750 600,850 T1200,800 L1920,1080 L0,1080 Z' fill='url(%23purpleGrad)' opacity='0.2'/%3E%3Cpath d='M1920,300 Q1500,200 1100,280 T300,250 L0,0 L1920,0 Z' fill='url(%23orangeGrad)' opacity='0.25'/%3E%3Cpath d='M1920,200 Q1600,100 1200,180 T400,150 L0,0 L1920,0 Z' fill='url(%23orangeGrad)' opacity='0.15'/%3E%3C/svg%3E");
+    background-size: cover;
+    background-position: center;
+    z-index: 0;
+    opacity: 0.8;
+    pointer-events: none;
+}
+
+.login-container {
+    background: rgba(20, 20, 30, 0.25);
+    backdrop-filter: blur(30px) saturate(150%);
+    -webkit-backdrop-filter: blur(30px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 24px;
+    padding: 40px;
+    max-width: 420px;
+    width: 90%;
+    box-shadow:
+        0 8px 32px 0 rgba(0, 0, 0, 0.5),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 80px rgba(168, 85, 247, 0.15);
+    position: relative;
+    overflow: hidden;
+    z-index: 10;
+}
+
+.login-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b);
+}
+
+.login-header { text-align: center; margin-bottom: 24px; }
+.login-header h1 {
+    font-size: 24px; font-weight: 700; margin-bottom: 8px;
+    background: linear-gradient(135deg, #f8fafc 0%, #cbd5e1 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+.login-header p { font-size: 14px; color: #94a3b8; line-height: 1.5; }
+
+.input-group { margin-bottom: 20px; position: relative; }
+.input-group label {
+    display: block; font-size: 11px; color: #64748b; margin-bottom: 6px;
+    text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+}
+.input-group input {
+    width: 100%; padding: 12px 50px 12px 16px;
+    background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px;
+    color: #f8fafc; font-size: 15px; font-family: inherit;
+    transition: all 0.3s ease; outline: none;
+}
+.input-group input:focus {
+    border-color: rgba(59, 130, 246, 0.6);
+    background: rgba(15, 23, 42, 0.7);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.password-toggle {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: #64748b; cursor: pointer; padding: 8px;
+    transition: color 0.2s; z-index: 10;
+}
+.password-toggle:hover { color: #3b82f6; }
+
+.submit-btn {
+    width: 100%;
+    background: linear-gradient(135deg, #a855f7 0%, #ea580c 100%);
+    color: white; padding: 14px; border: none; border-radius: 12px;
+    font-size: 15px; font-weight: 700; cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    text-transform: uppercase; letter-spacing: 1px;
+    box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    position: relative; overflow: hidden;
+}
+.submit-btn:hover {
+    transform: scale(0.98);
+    box-shadow: 0 4px 10px rgba(234, 88, 12, 0.3), 0 0 15px rgba(168, 85, 247, 0.3);
+    border-color: rgba(255, 255, 255, 0.2); filter: brightness(1.1);
+}
+.submit-btn:active { transform: scale(0.95); filter: brightness(0.9); }
+.submit-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
+.error-message {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;
+    padding: 12px 16px; border-radius: 10px; font-size: 13px; margin-bottom: 20px;
+}
+
+.security-notice {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(22, 163, 74, 0.08) 100%);
+    backdrop-filter: blur(10px); border: 1px solid rgba(34, 197, 94, 0.2);
+    border-radius: 10px; padding: 16px; margin-top: 24px; text-align: center;
+}
+.security-notice .icon { color: #c52222; font-size: 20px; margin-bottom: 8px; }
+.security-notice .title { color: #de4a4a; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.security-notice .text { color: #ef8686; font-size: 12px; line-height: 1.5; }
+
+
+/* --- PORTAL STYLES (Cleaning up redundancies) --- */
+
+/* Gradient Text (Preserving this util) */
+.gradient-text {
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* Sections are now handled above with enhanced designs */
+.bg-footer { border-top: none; }
+
+.container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+
+.btn {
+    background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+    color: white; padding: 12px 24px; border-radius: 12px; text-decoration: none;
+    display: inline-block; font-weight: 600; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+.btn:hover { transform: translateY(-2px); box-shadow: 0 0 15px rgba(168, 85, 247, 0.4); }
+
+.feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; padding: 4rem 0; }
+.feature-card { 
+    background: transparent; padding: 2.5rem; border-radius: 24px; border: none; 
+    transition: all 0.4s ease;
+}
+.feature-card:hover { transform: translateY(-5px); }
+
+/* Logo Styles */
+.nav-logo-container {
+     display: block; width: 44px; height: 44px;
+     background-image: url('./assets/logos/innerorbit-logo.png'); /* Adjusted path for Vite */
+     background-size: contain; background-repeat: no-repeat; background-position: center;
+     filter: drop-shadow(0 8px 12px rgba(0,0,0,0.6)) drop-shadow(0 0 10px rgba(255,255,255,0.2));
+     transform: perspective(500px) translateZ(0);
+     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+.nav-logo-container:hover { transform: perspective(500px) translateZ(20px) scale(1.1); }
+
+/* Traveling Logo Animation Class (applied during transition) */
+.logo-traveling {
+    position: fixed !important; top: 20px !important; left: 20px !important;
+    width: 44px !important; height: 44px !important;
+    transform: none !important; margin: 0 !important; z-index: 2000 !important;
+    filter: drop-shadow(0 8px 12px rgba(0,0,0,0.6)) drop-shadow(0 0 10px rgba(255,255,255,0.2)) !important;
+}
+
+/* Responsive Queries */
+@media (max-width: 1024px) {
+    .container { max-width: 95%; }
+}
+@media (max-width: 768px) {
+    .container { padding: 0 20px; }
+    .feature-grid { grid-template-columns: 1fr; gap: 1.5rem; }
+    .page-login .container { padding: 24px 20px; margin: 16px; }
+}

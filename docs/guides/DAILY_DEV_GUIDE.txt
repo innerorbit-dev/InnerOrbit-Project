@@ -1,0 +1,75 @@
+# INNERORBIT DAILY DEVELOPMENT & TESTING GUIDE
+# Last Updated: 2026-03-17
+# Created by: Antigravity AI
+
+This guide contains instructions on how to run and test the core components of the InnerOrbit ecosystem.
+
+================================================================================
+1. CORE PLATFORM: INNERORBIT UNIVERSAL (React Native + Expo)
+================================================================================
+Location: /innerorbit-universal/
+Target: Android, iOS, Web, and Desktop.
+
+1. INSTALLATION
+   cd innerorbit-universal
+   npm install
+
+2. RUNNING THE APP
+   - Start Expo Server: npx expo start
+   - Web Platform: npm run web
+   - Android Emul: npm run android
+   - Desktop (Dev): npm run electron:start
+
+3. TESTING
+   - Run Unit Tests: npm test
+   - Run Build Check: npm run build:web
+
+================================================================================
+2. ADVANCED BACKEND: ORACLE POWERED (Node.js + Python)
+================================================================================
+Location: /oracle-server-backend/
+Target: User management, encrypted signaling, and future data vaults.
+
+1. INSTALLATION
+   cd oracle-server-backend
+   npm install
+   # Ensure Oracle Wallet is in /wallet/
+
+2. DATABASE INITIALIZATION
+   npm run db:init
+
+3. RUNNING THE SERVER
+   npm run dev
+
+4. API TESTING
+   npm test
+
+================================================================================
+3. REGISTRATION PORTALS (Deployment & Onboarding)
+================================================================================
+
+1. LEGACY PORTAL (Vanilla JS/Firebase)
+   - Location: /download-portal/
+   - How to test: cd download-portal && firebase serve
+
+2. MODERN PORTAL (React + Vite)
+   - Location: /download-portal-react/
+   - How to run:
+     cd download-portal-react
+     npm install
+     npm run dev
+
+================================================================================
+GENERAL MANAGEMENT (Simplified CLI)
+================================================================================
+Use the Python Manager for unified project actions:
+
+- cd /tools/
+- python manager.py
+- python gui_manager.py (For Obsidian Dashboard)
+
+Supported actions: Build Android, Build Desktop, Cleanup, Version Bump, etc.
+
+################################################################################
+INNERORBIT - SECURE COMMUNICATION HUB
+################################################################################

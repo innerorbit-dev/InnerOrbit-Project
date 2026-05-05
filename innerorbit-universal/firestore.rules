@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper to check if a request is authenticated (Email/Google)
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Authenticated users can read profiles
+      allow read: if isAuth(); 
+      
+      // Allow public listing for ID uniqueness check during signup
+      allow list: if true; 
+
+      // Writing: 
+      // 1. Full Auth users can update their own entire profile
+      // 2. PIN users (unauthenticated) can only update 'isOnline' and 'lastSeen' for presence parity
+      allow update: if (isAuth() && request.auth.uid == userId) || 
+                       (request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['isOnline', 'lastSeen', 'updatedAt']));
+      
+      allow create, delete: if isAuth() && request.auth.uid == userId;
+    }
+
+    // Contacts Subcollection
+    match /users/{userId}/contacts/{contactId} {
+      allow read, list: if isAuth() && request.auth.uid == userId;
+      allow write: if isAuth() && request.auth.uid == userId;
+    }
+
+    // Conversations Collection
+    match /conversations/{conversationId} {
+      allow read, update, delete: if isAuth() && request.auth.uid in resource.data.participantIds;
+      allow create: if isAuth();
+      
+      match /messages/{messageId} {
+        allow read, write: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+      }
+    }
+
+    // Connection Requests
+    match /connectionRequests/{requestId} {
+      allow get: if isAuth() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.receiverId); 
+      allow list: if isAuth() && (
+        request.auth.uid == resource.data.receiverId ||
+        request.auth.uid == resource.data.senderId
+      );
+      allow create: if isAuth();
+      allow update, delete: if isAuth() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.receiverId);
+    }
+
+    // Portal & Metadata (Public)
+    match /portal_passwords/{hash} { allow get, create: if true; }
+    match /portal_access_logs/{logId} { allow create: if true; }
+    match /app_metadata/{docId} { allow read: if true; }
+    match /app/version { allow read, write: if true; }
+  }
+}

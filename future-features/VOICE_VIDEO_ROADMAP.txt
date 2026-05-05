@@ -1,0 +1,468 @@
+================================================================================
+              CIPHERPLAY - VOICE & VIDEO CALLING ROADMAP
+================================================================================
+
+CURRENT STATUS: Text Chat ✅ Complete
+NEXT GOAL: Add Voice & Video Calling Features
+
+================================================================================
+PHASE 1: GET TEXT CHAT WORKING (CURRENT - 1 Week)
+================================================================================
+
+Week 1: Foundation Setup
+  ☐ Day 1-2: Complete Firebase setup
+    - Create Firebase project
+    - Add credentials to firebase.js
+    - Enable Authentication
+    - Create Firestore database
+    - Add Security Rules
+  
+  ☐ Day 3-4: Testing & Bug Fixes
+    - Test user registration
+    - Test user search by ID
+    - Test sending/receiving messages
+    - Test encryption/decryption
+    - Fix any issues
+  
+  ☐ Day 5-7: Deployment
+    - Build APK for Android
+    - Test on real device
+    - Deploy to Firebase Hosting (web version)
+    - Create user documentation
+
+DELIVERABLE: Fully working encrypted text chat app ✅
+
+================================================================================
+PHASE 2: VOICE CALLING FOUNDATION (2-3 Weeks)
+================================================================================
+
+Week 2-3: Learn WebRTC Basics
+  ☐ Understand WebRTC concepts
+    - What is WebRTC?
+    - How peer-to-peer connections work
+    - Signaling vs media streams
+    - ICE candidates and STUN/TURN servers
+  
+  ☐ Study Resources:
+    - WebRTC Documentation: https://webrtc.org/getting-started/overview
+    - React Native WebRTC: https://github.com/react-native-webrtc/react-native-webrtc
+    - Tutorial: https://www.youtube.com/watch?v=WmR9IMUD_CY
+  
+  ☐ Install Required Packages:
+    npm install react-native-webrtc
+    npm install @react-native-firebase/functions (for signaling)
+  
+  ☐ Set Up Signaling Server
+    - Option 1: Firebase Cloud Functions (recommended)
+    - Option 2: Socket.io server
+    - Option 3: Firebase Realtime Database
+
+Week 4: Basic Voice Call Implementation
+  ☐ Create Call Infrastructure
+    - Call state management (idle, calling, ringing, connected)
+    - Call invitation system
+    - Call acceptance/rejection
+  
+  ☐ Implement WebRTC Connection
+    - Create RTCPeerConnection
+    - Handle ICE candidates
+    - Manage media streams (audio only)
+  
+  ☐ Build Call UI
+    - Outgoing call screen
+    - Incoming call screen
+    - Active call screen with controls
+    - Call ended screen
+
+DELIVERABLE: Basic voice calling between two users ✅
+
+================================================================================
+PHASE 3: VOICE CALL FEATURES (1-2 Weeks)
+================================================================================
+
+Week 5: Enhanced Voice Features
+  ☐ Call Controls
+    - Mute/unmute microphone
+    - Speaker on/off
+    - End call button
+    - Call duration timer
+  
+  ☐ Call Notifications
+    - Push notifications for incoming calls
+    - Ringtone for incoming calls
+    - Vibration patterns
+    - Call history/missed calls
+  
+  ☐ Call Quality
+    - Echo cancellation
+    - Noise suppression
+    - Auto gain control
+    - Network quality indicator
+
+Week 6: Call Management
+  ☐ Database Schema Updates
+    /calls/{callId}
+      - callerId: string
+      - receiverId: string
+      - callType: "voice" | "video"
+      - status: "calling" | "ringing" | "active" | "ended" | "missed"
+      - startTime: timestamp
+      - endTime: timestamp
+      - duration: number
+  
+  ☐ Call History
+    - Display past calls
+    - Show call duration
+    - Missed call indicators
+    - Call back functionality
+
+DELIVERABLE: Full-featured voice calling ✅
+
+================================================================================
+PHASE 4: VIDEO CALLING (2 Weeks)
+================================================================================
+
+Week 7: Video Implementation
+  ☐ Camera Access
+    - Request camera permissions
+    - Front/back camera toggle
+    - Camera preview
+  
+  ☐ Video Stream Setup
+    - Add video track to RTCPeerConnection
+    - Handle video constraints (resolution, framerate)
+    - Implement video rendering
+  
+  ☐ Video UI Components
+    - Local video preview (small)
+    - Remote video (full screen)
+    - Camera on/off toggle
+    - Switch camera button
+
+Week 8: Video Features & Polish
+  ☐ Advanced Video Features
+    - Picture-in-picture mode
+    - Screen sharing (optional)
+    - Video quality adjustment
+    - Bandwidth optimization
+  
+  ☐ UI/UX Improvements
+    - Smooth transitions
+    - Loading states
+    - Error handling
+    - Network quality warnings
+
+DELIVERABLE: Full video calling functionality ✅
+
+================================================================================
+PHASE 5: OPTIMIZATION & TESTING (1 Week)
+================================================================================
+
+Week 9: Performance & Testing
+  ☐ Optimization
+    - Reduce battery consumption
+    - Optimize bandwidth usage
+    - Improve connection stability
+    - Handle poor network conditions
+  
+  ☐ Testing
+    - Test on different devices
+    - Test on different networks (WiFi, 4G, 5G)
+    - Test with multiple users
+    - Test edge cases (call drops, network switches)
+  
+  ☐ Bug Fixes
+    - Fix audio/video sync issues
+    - Fix connection failures
+    - Fix UI glitches
+    - Handle app backgrounding
+
+DELIVERABLE: Stable, production-ready calling features ✅
+
+================================================================================
+TECHNICAL REQUIREMENTS
+================================================================================
+
+NEW PACKAGES NEEDED:
+  - react-native-webrtc (WebRTC for React Native)
+  - @react-native-firebase/functions (for signaling)
+  - react-native-push-notification (for call notifications)
+  - react-native-incall-manager (call audio routing)
+  - react-native-keep-awake (prevent screen sleep during calls)
+
+BACKEND SERVICES:
+  - STUN Server (free: Google's STUN server)
+  - TURN Server (for NAT traversal - may need paid service)
+  - Signaling Server (Firebase Functions or Socket.io)
+
+PERMISSIONS NEEDED:
+  - Microphone access (RECORD_AUDIO)
+  - Camera access (CAMERA) - for video
+  - Notification permissions
+  - Background execution
+
+FIREBASE UPDATES:
+  - Cloud Functions for signaling
+  - Realtime Database for call state
+  - Cloud Messaging for push notifications
+
+================================================================================
+ESTIMATED COSTS
+================================================================================
+
+FREE TIER (Small Scale):
+  - Firebase (Free tier sufficient for testing)
+  - Google STUN Server (Free)
+  - Development tools (Free)
+  TOTAL: $0/month
+
+PRODUCTION (100-1000 users):
+  - Firebase Blaze Plan: ~$25-50/month
+  - TURN Server (Twilio/Xirsys): ~$50-100/month
+  - Total: ~$75-150/month
+
+PRODUCTION (1000+ users):
+  - Firebase: ~$100-200/month
+  - TURN Server: ~$200-500/month
+  - Total: ~$300-700/month
+
+================================================================================
+LEARNING RESOURCES
+================================================================================
+
+WebRTC Fundamentals:
+  - WebRTC.org: https://webrtc.org/
+  - MDN WebRTC Guide: https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API
+  - WebRTC for Beginners: https://www.html5rocks.com/en/tutorials/webrtc/basics/
+
+React Native WebRTC:
+  - GitHub Repo: https://github.com/react-native-webrtc/react-native-webrtc
+  - Documentation: https://github.com/react-native-webrtc/react-native-webrtc/blob/master/Documentation/
+  - Example App: https://github.com/react-native-webrtc/react-native-webrtc/tree/master/examples
+
+Signaling:
+  - Firebase Functions: https://firebase.google.com/docs/functions
+  - Socket.io Tutorial: https://socket.io/get-started/chat
+  - WebRTC Signaling: https://www.html5rocks.com/en/tutorials/webrtc/infrastructure/
+
+Video Tutorials:
+  - WebRTC Crash Course: https://www.youtube.com/watch?v=WmR9IMUD_CY
+  - React Native WebRTC: https://www.youtube.com/watch?v=oxFr7we3LC8
+  - Building Video Chat: https://www.youtube.com/watch?v=DvlyzDZDEq4
+
+================================================================================
+IMPLEMENTATION EXAMPLE (SIMPLIFIED)
+================================================================================
+
+1. CALL INITIATION:
+   ```javascript
+   // In your chat screen, add call button
+   const initiateCall = async (receiverId) => {
+     // Create call document in Firestore
+     const callDoc = await addDoc(collection(db, 'calls'), {
+       callerId: currentUserId,
+       receiverId: receiverId,
+       status: 'calling',
+       timestamp: Timestamp.now()
+     });
+     
+     // Initialize WebRTC
+     const peerConnection = new RTCPeerConnection(config);
+     
+     // Get local audio stream
+     const stream = await mediaDevices.getUserMedia({ audio: true });
+     stream.getTracks().forEach(track => {
+       peerConnection.addTrack(track, stream);
+     });
+     
+     // Create offer
+     const offer = await peerConnection.createOffer();
+     await peerConnection.setLocalDescription(offer);
+     
+     // Send offer to receiver via Firestore
+     await updateDoc(callDoc, { offer: offer });
+   };
+   ```
+
+2. CALL RECEPTION:
+   ```javascript
+   // Listen for incoming calls
+   useEffect(() => {
+     const unsubscribe = onSnapshot(
+       query(collection(db, 'calls'), 
+       where('receiverId', '==', currentUserId),
+       where('status', '==', 'calling')),
+       (snapshot) => {
+         snapshot.forEach(async (doc) => {
+           // Show incoming call UI
+           showIncomingCallScreen(doc.data());
+         });
+       }
+     );
+     return unsubscribe;
+   }, []);
+   ```
+
+3. CALL ACCEPTANCE:
+   ```javascript
+   const acceptCall = async (callId, offer) => {
+     // Initialize WebRTC
+     const peerConnection = new RTCPeerConnection(config);
+     
+     // Get local audio stream
+     const stream = await mediaDevices.getUserMedia({ audio: true });
+     stream.getTracks().forEach(track => {
+       peerConnection.addTrack(track, stream);
+     });
+     
+     // Set remote description (offer)
+     await peerConnection.setRemoteDescription(offer);
+     
+     // Create answer
+     const answer = await peerConnection.createAnswer();
+     await peerConnection.setLocalDescription(answer);
+     
+     // Send answer back via Firestore
+     await updateDoc(doc(db, 'calls', callId), {
+       answer: answer,
+       status: 'active'
+     });
+   };
+   ```
+
+================================================================================
+TIMELINE SUMMARY
+================================================================================
+
+PHASE 1: Text Chat Working          → 1 week    ✅ (Current)
+PHASE 2: Voice Call Foundation       → 3 weeks   ⏳
+PHASE 3: Voice Call Features         → 2 weeks   ⏳
+PHASE 4: Video Calling               → 2 weeks   ⏳
+PHASE 5: Optimization & Testing      → 1 week    ⏳
+
+TOTAL TIME: 9 weeks (2-3 months)
+
+SKILL LEVEL REQUIRED:
+  - Phase 1: Beginner ✅
+  - Phase 2-3: Intermediate
+  - Phase 4-5: Intermediate to Advanced
+
+================================================================================
+RECOMMENDED APPROACH
+================================================================================
+
+STEP 1: Master Text Chat First (1-2 weeks)
+  - Get current app working perfectly
+  - Deploy and test with real users
+  - Fix all bugs
+  - Learn Firebase thoroughly
+
+STEP 2: Learn WebRTC Theory (1 week)
+  - Watch tutorials
+  - Read documentation
+  - Understand concepts
+  - Build simple WebRTC demo
+
+STEP 3: Implement Voice Calling (3-4 weeks)
+  - Start with basic peer-to-peer
+  - Add signaling
+  - Build UI
+  - Test thoroughly
+
+STEP 4: Add Video Calling (2-3 weeks)
+  - Extend voice calling
+  - Add camera support
+  - Optimize performance
+
+STEP 5: Polish & Deploy (1-2 weeks)
+  - Fix bugs
+  - Optimize
+  - Test on multiple devices
+  - Deploy to production
+
+TOTAL: 8-12 weeks for complete implementation
+
+================================================================================
+ALTERNATIVE: QUICK START WITH EXISTING SOLUTIONS
+================================================================================
+
+If you want calling features FASTER, consider using:
+
+1. Agora.io (Recommended)
+   - Pre-built voice/video calling
+   - Easy to integrate
+   - Free tier: 10,000 minutes/month
+   - Cost: $0.99-$3.99 per 1000 minutes
+   - Integration time: 1-2 weeks
+
+2. Twilio Programmable Video
+   - Enterprise-grade solution
+   - Easy React Native SDK
+   - Free trial available
+   - Cost: $0.0015-$0.004 per minute
+   - Integration time: 1-2 weeks
+
+3. SendBird Calls
+   - Built for chat apps
+   - Easy integration
+   - Free tier available
+   - Integration time: 1 week
+
+PROS: Much faster (1-2 weeks vs 2-3 months)
+CONS: Monthly costs, less control, dependency on third-party
+
+================================================================================
+MY RECOMMENDATION
+================================================================================
+
+FOR YOU (Beginner Level):
+
+OPTION A: DIY WebRTC (Learning Path)
+  ✅ Learn valuable skills
+  ✅ Full control
+  ✅ No monthly costs
+  ❌ Takes 2-3 months
+  ❌ Complex to implement
+  ❌ Harder to debug
+
+OPTION B: Use Agora.io (Practical Path)
+  ✅ Fast implementation (1-2 weeks)
+  ✅ Reliable and tested
+  ✅ Good documentation
+  ❌ Monthly costs (~$50-100)
+  ❌ Less learning
+  ❌ Vendor lock-in
+
+MY SUGGESTION:
+  1. Get text chat working first (1 week)
+  2. Deploy and test with users
+  3. Then decide: DIY or Agora based on your goals
+  4. If learning is priority → DIY WebRTC
+  5. If speed is priority → Agora.io
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+IMMEDIATE (This Week):
+  ☐ Finish npm install
+  ☐ Set up Firebase project
+  ☐ Test text chat
+  ☐ Deploy basic app
+
+NEXT MONTH:
+  ☐ Decide: DIY WebRTC or Agora.io
+  ☐ Start learning WebRTC (if DIY)
+  ☐ Implement basic voice calling
+
+MONTH 2-3:
+  ☐ Complete voice calling
+  ☐ Add video calling
+  ☐ Test and optimize
+  ☐ Deploy full app
+
+================================================================================
+                              GOOD LUCK! 🚀
+================================================================================
+
+Questions? Need help with any phase? Just ask!

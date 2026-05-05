@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Status - InnerOrbit</title>
+    <link rel="icon" type="image/svg+xml" href="assets/favicons/error-favicon.svg">
+    <style>
+        :root {
+            --primary-color: #00ff00; /* Default Green */
+            --bg-color: #050505;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                linear-gradient(rgba(0, 255, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 0, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+            color: var(--primary-color);
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 20px;
+            height: 100vh;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            transition: all 0.5s ease;
+        }
+
+        /* Red Theme Class */
+        body.locked-mode {
+            --primary-color: #ff3333;
+            background-image: 
+                linear-gradient(rgba(255, 0, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 0, 0, 0.03) 1px, transparent 1px);
+        }
+
+        h1 {
+            color: var(--primary-color);
+            font-size: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--primary-color);
+            padding-bottom: 10px;
+            display: inline-block;
+        }
+
+        .error-container {
+            width: 100%;
+            margin: 40px 0;
+        }
+
+        .error-message {
+            color: #ff3333;
+            font-size: clamp(2rem, 8vw, 6rem);
+            font-weight: bold;
+            text-shadow: 0 0 10px rgba(255, 51, 51, 0.6);
+            animation: pulse 2s infinite;
+            line-height: 1.1;
+            word-wrap: break-word;
+        }
+
+        .status-text {
+            font-size: 1.2rem;
+            margin-top: 10px;
+            opacity: 0.8;
+            color: var(--primary-color);
+        }
+
+        .timer {
+            font-size: 2.5rem;
+            color: #ffffff;
+            margin: 20px 0;
+            font-weight: bold;
+            display: none; /* Hidden by default */
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.8; }
+            50% { opacity: 1; }
+            100% { opacity: 0.8; }
+        }
+
+        .action-btn {
+            background: transparent;
+            color: var(--primary-color);
+            border: 1px solid var(--primary-color);
+            padding: 12px 24px;
+            font-size: 16px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+            font-family: inherit;
+        }
+
+        .action-btn:hover {
+            background: var(--primary-color);
+            color: #000000;
+            box-shadow: 0 0 15px var(--primary-color);
+        }
+
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.2) 50%,
+                rgba(0,0,0,0.2)
+            );
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="scanlines"></div>
+    
+    <h1 id="pageTitle">InnerOrbit Portal</h1>
+    
+    <div class="error-container">
+        <div class="error-message" id="mainMessage">ERROR 404</div>
+        <div class="status-text" id="statusMessage">Page Not Found</div>
+    </div>
+
+    <div class="timer" id="countdown">--:--</div>
+
+    <div class="timer" id="countdown">--:--</div>
+
+    <div id="adminPanel" style="display: none; margin-top: 30px; border: 1px solid #ff3333; padding: 20px; width: 80%; max-width: 500px; background: rgba(255, 51, 51, 0.05); border-radius: 8px;">
+        <div style="font-size: 1.1rem; font-weight: bold; margin-bottom: 10px; color: #ff6666; text-transform: uppercase;">Support Assistance</div>
+        <div style="font-size: 0.9rem; margin-bottom: 5px; color: #ffcccc;">Ticket Reference ID:</div>
+        <div style="font-size: 1.5rem; font-weight: bold; color: #ffffff; letter-spacing: 1px; margin-bottom: 10px;" id="ticketId">--</div>
+        <div style="font-size: 0.85rem; color: #ff6666;">Please provide this ID to the administrator to unlock your account.</div>
+    </div>
+
+    <a href="/" id="actionButton" class="action-btn">[ Return to Home ]</a>
+
+    <script>
+        // Configuration
+        const LOCKOUT_DURATION = 2 * 60 * 1000; // 2 minutes in ms
+
+        function init() {
+            const params = new URLSearchParams(window.location.search);
+            const isLockout = params.get('error') === 'locked';
+            const lockoutTimestamp = localStorage.getItem('lockoutTimestamp');
+
+            // Determine Mode
+            if (isLockout || (lockoutTimestamp && isActiveLockout(lockoutTimestamp))) {
+                activateLockoutMode(parseInt(lockoutTimestamp));
+            } else {
+                activate404Mode();
+            }
+        }
+
+        function isActiveLockout(timestamp) {
+            return (Date.now() - timestamp) < LOCKOUT_DURATION;
+        }
+
+        function activateLockoutMode(timestamp) {
+            // Check if timestamp exists, if not set it
+            if (!timestamp) {
+                timestamp = Date.now();
+                localStorage.setItem('lockoutTimestamp', timestamp);
+            }
+
+            document.body.classList.add('locked-mode');
+            document.getElementById('pageTitle').innerText = "SECURITY ALERT";
+            document.getElementById('mainMessage').innerText = "ACCESS LOCKED";
+            document.getElementById('statusMessage').innerText = "Maximum attempts exceeded.";
+            document.getElementById('statusMessage').style.display = 'block';
+            document.getElementById('countdown').style.display = 'block';
+            // Logic: Only show ticket after repeated access attempts
+            handleTicketDisplay(timestamp);
+
+            // Hide Manual Buttons initially
+            const btn = document.getElementById('actionButton');
+            btn.style.display = "none"; 
+
+            startTimer(timestamp);
+        }
+
+        function handleTicketDisplay(timestamp) {
+            // Get visit count for this lockout session
+            // We use a separate key to track how many times they've specifically looked at the LOCKOUT screen
+            
+            const TWELVE_HOURS = 12 * 60 * 60 * 1000;
+            let visits = JSON.parse(localStorage.getItem('lockoutVisits') || '{"count": 0, "firstSeen": 0}');
+            const now = Date.now();
+
+            // Reset if older than 12 hours
+            if (now - visits.firstSeen > TWELVE_HOURS) {
+                visits = { count: 0, firstSeen: now };
+            }
+
+            // Increment visit count
+            visits.count++;
+            localStorage.setItem('lockoutVisits', JSON.stringify(visits));
+
+            // Only show Admin/Support Ticket if they have checked this page > 3 times
+            // "same ip address same date ... tries to access ... clicks whatever" -> Persistent user
+            if (visits.count >= 3) {
+                 generateTicket(timestamp);
+            } else {
+                document.getElementById('adminPanel').style.display = 'none';
+            }
+        }
+
+        function generateTicket(timestamp) {
+            const adminPanel = document.getElementById('adminPanel');
+            const ticketIdDiv = document.getElementById('ticketId');
+
+            // Generate "Dynamic" Ticket ID based on timestamp
+            const randomSuffix = Math.floor(Math.random() * 9000) + 1000;
+            const ticketId = `SEC-${timestamp.toString().slice(-6)}-${randomSuffix}`;
+            
+            ticketIdDiv.innerText = ticketId;
+            adminPanel.style.display = "block";
+        }
+
+        function activate404Mode() {
+            document.body.classList.remove('locked-mode');
+            document.getElementById('pageTitle').innerText = "InnerOrbit PORTAL";
+            document.getElementById('mainMessage').innerText = "ERROR 404: PAGE NOT FOUND";
+            document.getElementById('statusMessage').style.display = 'none'; 
+            document.getElementById('countdown').style.display = 'none';
+            document.getElementById('adminPanel').style.display = 'none';
+            
+            const btn = document.getElementById('actionButton');
+            btn.style.display = "inline-block";
+            btn.href = "/";
+            btn.innerText = "[ RETURN TO HOME ]";
+            btn.onclick = null;
+        }
+
+        // ... existing startTimer, unlockSystem, etc ...
+
+        function startTimer(startTime) {
+            function update() {
+                const now = Date.now();
+                const elapsed = now - startTime;
+                const remaining = LOCKOUT_DURATION - elapsed;
+
+                if (remaining <= 0) {
+                    document.getElementById('countdown').innerText = "00:00";
+                    unlockSystem();
+                } else {
+                    const minutes = Math.floor(remaining / 60000);
+                    const seconds = Math.floor((remaining % 60000) / 1000);
+                    document.getElementById('countdown').innerText = 
+                        `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                    requestAnimationFrame(update);
+                }
+            }
+            update();
+        }
+
+        function unlockSystem() {
+            localStorage.removeItem('lockoutTimestamp');
+            localStorage.removeItem('failedAttempts');
+            
+            document.getElementById('mainMessage').innerText = "ACCESS RESTORED";
+            document.getElementById('statusMessage').innerText = "Redirecting...";
+            document.getElementById('adminPanel').style.display = 'none'; // Hide admin on unlock
+
+            // Show manual button
+            const btn = document.getElementById('actionButton');
+            btn.style.display = "inline-block";
+            btn.innerText = "[ MANUAL RELOAD ]";
+            btn.href = "/";
+            btn.onclick = null;
+
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1000);
+        }
+
+        // Run
+        init();
+    </script>
+    <script src="js/network-monitor.js"></script>
+</body>
+</html>

@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InnerOrbit Documentation - Secure Social Discovery</title>
+
+    <!-- Favicons -->
+    <link rel="icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <link rel="shortcut icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
+    <link rel="alternate icon" type="image/png" href="assets/logos/innerorbit-logo.png">
+
+    <!-- Main CSS -->
+    <link href="css/style.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/docs.css">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <!-- Highlight.js -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+
+<body class="docs-page">
+    <!-- Top Navigation (Logo + Actions) -->
+    <header class="docs-header">
+        <div class="header-container">
+            <a href="index.html" class="docs-logo">
+                <img src="assets/logos/innerorbit-logo.png" alt="InnerOrbit" class="logo-img">
+                <span>Docs</span>
+            </a>
+            <div class="header-actions">
+                <a href="index.html" class="btn-secondary">Back to Portal</a>
+                <a href="https://github.com/innerorbit" class="btn-primary">GitHub</a>
+            </div>
+        </div>
+    </header>
+
+    <div class="docs-wrapper">
+        <!-- Sidebar Navigation -->
+        <aside class="docs-sidebar">
+            <nav class="sidebar-nav">
+                <div class="nav-group">
+                    <button class="nav-toggle active">Getting Started <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown active">
+                        <a href="#overview" class="nav-link active">Overview</a>
+                        <a href="#installation" class="nav-link">Installation</a>
+                        <a href="#setup" class="nav-link">Quick Setup</a>
+                    </div>
+                </div>
+                <div class="nav-group">
+                    <button class="nav-toggle">Account & Profile <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown">
+                        <a href="#account" class="nav-link">Account Setup</a>
+                        <a href="#profile" class="nav-link">Profile Settings</a>
+                        <a href="#account-security" class="nav-link">Account Security</a>
+                    </div>
+                </div>
+                <div class="nav-group">
+                    <button class="nav-toggle">Platform Guides <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown">
+                        <a href="#mobile-guide" class="nav-link">Mobile App</a>
+                        <a href="#web-guide" class="nav-link">Web Portal</a>
+                        <a href="#desktop-guide" class="nav-link">Desktop App</a>
+                    </div>
+                </div>
+                <div class="nav-group">
+                    <button class="nav-toggle">Messaging & Features <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown">
+                        <a href="#messaging" class="nav-link">Messaging Guide</a>
+                        <a href="#stealth" class="nav-link">Stealth Mode</a>
+                        <a href="#media" class="nav-link">Media & Files</a>
+                    </div>
+                </div>
+                <div class="nav-group">
+                    <button class="nav-toggle">Privacy & Security <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown">
+                        <a href="#security" class="nav-link">Security Features</a>
+                        <a href="#privacy" class="nav-link">Privacy Controls</a>
+                        <a href="#encryption" class="nav-link">Encryption</a>
+                    </div>
+                </div>
+                <div class="nav-group">
+                    <button class="nav-toggle">Resources <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown">
+                        <a href="#faq" class="nav-link">FAQ</a>
+                        <a href="#troubleshooting" class="nav-link">Troubleshooting</a>
+                        <a href="#contact" class="nav-link">Support</a>
+                    </div>
+                </div>
+                <div class="nav-group">
+                    <button class="nav-toggle">Updates & Versions <span class="arrow">▼</span></button>
+                    <div class="nav-dropdown">
+                        <a href="#release-notes" class="nav-link">Release Notes</a>
+                        <a href="#roadmap" class="nav-link">Feature Roadmap</a>
+                    </div>
+                </div>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="docs-content">
+            <div class="content-container">
+                <div class="breadcrumb">Overview</div>
+                <!-- Hero / Intro -->
+                <section id="overview" class="doc-section hero-section">
+                    <h1 class="page-title">Welcome to InnerOrbit</h1>
+                    <p class="lead-text">Chat safely. Chat privately. No one will know.</p>
+                    
+                    <div class="intro-description" style="margin-bottom: 2rem; max-width: 700px; color: var(--text-secondary); line-height: 1.6;">
+                        InnerOrbit is a chat app that looks like a calculator or a game. It keeps your messages safe so only you and your friend can read them.
+                    </div>
+
+                    <div class="quick-links-grid">
+                        <a href="#installation" class="quick-link-card">
+                            <div class="icon-box">
+                                <span style="font-size: 1.2rem;">🚀</span>
+                            </div>
+                            <div>
+                                <h4>Get the App</h4>
+                                <p>Download for Phone or Computer</p>
+                            </div>
+                        </a>
+                        <a href="#features" class="quick-link-card">
+                            <div class="icon-box">
+                                <span style="font-size: 1.2rem;">✨</span>
+                            </div>
+                            <div>
+                                <h4>Cool Features</h4>
+                                <p>Hidden Mode, Secret Chats</p>
+                            </div>
+                        </a>
+                        <a href="#security" class="quick-link-card">
+                            <div class="icon-box">
+                                <span style="font-size: 1.2rem;">🛡️</span>
+                            </div>
+                            <div>
+                                <h4>Safety</h4>
+                                <p>How we keep you safe</p>
+                            </div>
+                        </a>
+                    </div>
+                </section>
+
+                <hr class="section-divider">
+
+                <!-- Features Section -->
+                <section id="features" class="doc-section">
+                    <h2>Why Use InnerOrbit?</h2>
+                    <p>We built this app to keep your secrets safe.</p>
+                    
+                    <div class="features-grid">
+                        <div class="feature-item">
+                            <div class="feature-icon-wrapper">
+                                <span style="font-size: 1.5rem;">🔒</span>
+                            </div>
+                            <div class="feature-content">
+                                <h3>Private Messages</h3>
+                                <p>Only you and your friend can read your messages. We can't see them.</p>
+                            </div>
+                        </div>
+
+                        <div class="feature-item">
+                            <div class="feature-icon-wrapper">
+                                <span style="font-size: 1.5rem;">🎭</span>
+                            </div>
+                            <div class="feature-content">
+                                <h3>Hidden Identity</h3>
+                                <p>You don't need a phone number or email. You get a random ID.</p>
+                            </div>
+                        </div>
+
+                        <div class="feature-item">
+                            <div class="feature-icon-wrapper">
+                                <span style="font-size: 1.5rem;">⏱️</span>
+                            </div>
+                            <div class="feature-content">
+                                <h3>Disappearing Chats</h3>
+                                <p>Messages can delete themselves automatically after you read them.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="feature-item">
+                            <div class="feature-icon-wrapper">
+                                <span style="font-size: 1.5rem;">📱</span>
+                            </div>
+                            <div class="feature-content">
+                                <h3>Works Everywhere</h3>
+                                <p>Use it on your iPhone, Android, or Computer.</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <hr class="section-divider">
+
+                <!-- Installation Section -->
+                <section id="installation" class="doc-section">
+                    <h2>Installation</h2>
+                    <p>Select your platform to get started with InnerOrbit.</p>
+                    
+                    <div class="tabs-container">
+                        <div class="tabs-header">
+                            <button class="tab-btn active" onclick="switchTab('mobile')">Mobile</button>
+                            <button class="tab-btn" onclick="switchTab('web')">Web</button>
+                            <button class="tab-btn" onclick="switchTab('desktop')">Desktop</button>
+                        </div>
+                        
+                        <div class="tab-content active" id="mobile">
+                            <div class="step-list">
+                                <div class="step-item">
+                                    <span class="step-number">01</span>
+                                    <div class="step-details">
+                                        <h4>Download the App</h4>
+                                        <p>Visit the Google Play Store or Apple App Store and search for "InnerOrbit".</p>
+                                    </div>
+                                </div>
+                                <div class="step-item">
+                                    <span class="step-number">02</span>
+                                    <div class="step-details">
+                                        <h4>Grant Permissions</h4>
+                                        <p>Allow necessary permissions for contacts and notifications to ensure full functionality.</p>
+                                    </div>
+                                </div>
+                                <div class="step-item">
+                                    <span class="step-number">03</span>
+                                    <div class="step-details">
+                                        <h4>Create Identity</h4>
+                                        <p>Generate your unique 4-digit ID. No personal info needed.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="tab-content" id="web">
+                            <div class="code-block-wrapper">
+                                <div class="code-header">
+                                    <span>Browser Access</span>
+                                </div>
+                                <pre><code>https://app.innerorbit.io</code></pre>
+                            </div>
+                            <p class="mt-4">Simply navigate to the URL above. InnerOrbit Web supports all modern browsers including Chrome, Firefox, Safari, and Edge.</p>
+                        </div>
+
+                        <div class="tab-content" id="desktop">
+                            <h3>Windows Installation</h3>
+                            <ol class="install-steps">
+                                <li><strong>Download Installer</strong> - Download InnerOrbit.exe from the portal</li>
+                                <li><strong>Run as Administrator</strong> - Right-click the file and select "Run as Administrator"</li>
+                                <li><strong>Follow Installation Wizard</strong> - Choose installation directory and complete setup</li>
+                                <li><strong>Launch Application</strong> - Open InnerOrbit from the Start menu or desktop shortcut</li>
+                                <li><strong>Configure Settings</strong> - Set up your preferences and notification settings</li>
+                            </ol>
+
+                            <h3 style="margin-top: 2rem;">macOS Installation</h3>
+                            <ol class="install-steps">
+                                <li><strong>Download App</strong> - Get InnerOrbit.dmg from the portal</li>
+                                <li><strong>Open DMG File</strong> - Double-click to mount the disk image</li>
+                                <li><strong>Drag to Applications</strong> - Drag InnerOrbit to your Applications folder</li>
+                                <li><strong>Launch from Applications</strong> - Find and open InnerOrbit from Applications</li>
+                                <li><strong>Grant Permissions</strong> - Allow notifications and microphone access when prompted</li>
+                            </ol>
+
+                            <div class="warning-box">
+                                <strong>⚠️ Note:</strong> On macOS, you may need to allow the app in Security & Privacy settings if you get a warning.
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <hr class="section-divider">
+
+                <!-- Mobile Guide -->
+                <section id="mobile-guide" class="doc-section">
+                    <h2 class="doc-heading">Mobile App & Stealth Mode</h2>
+                    <p>The mobile experience is designed for maximum privacy and camouflage.</p>
+                    
+                    <h3>The Calculator Disguise</h3>
+                    <p>When you open InnerOrbit on mobile, it appears as a fully functional scientific calculator ("CalcX"). This decoy interface protects your privacy from prying eyes.</p>
+
+                    <h3 style="margin-top: 1.5rem;">Multiple Decoy Interfaces</h3>
+                    <p>InnerOrbit provides multiple game-based decoys to suit your preference. You can switch between them using the Floating Action Button (FAB) menu in the game interface.</p>
+                    <ul class="feature-list">
+                        <li><strong>Calculator:</strong> The default scientific calculator interface.</li>
+                        <li><strong>Tic-Tac-Toe:</strong> A fully playable Tic-Tac-Toe game against AI.</li>
+                        <li><strong>Ludo Master:</strong> A classic board game interface.</li>
+                        <li><strong>Guess Number:</strong> A simple number guessing game.</li>
+                    </ul>
+                    <p>All decoys are fully functional games/apps to maintain the illusion.</p>
+
+                    <div class="info-box" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #e2e8f0; padding: 1rem; border-radius: 8px; margin: 1.5rem 0;">
+                        <strong style="color: #34d399;">💡 Stealth Entry:</strong> The default way to access your chats is to <strong>Triple Tap</strong> the "AC" button (Calculator) or the game board/display area (Games).
+                    </div>
+
+                    <h3 style="margin-top: 1.5rem;">Access Methods</h3>
+                    <p>You can customize how you unlock the hidden messaging interface in <strong>Settings > Privacy > Stealth & Camouflage</strong>.</p>
+                    <ul class="feature-list">
+                        <li><strong>Triple Tap (Default):</strong> Tap the configured button (default "AC") 3 times quickly.</li>
+                        <li><strong>Triple Tap & Hold:</strong> Tap 3 times and hold the last tap for 3 seconds on the footer "CalcX" logo (Emergency/Alternative).</li>
+                        <li><strong>Secret Code:</strong> Configure a numeric code (e.g., "7331") and press "=" to unlock.</li>
+                        <li><strong>Header Lock:</strong> Long press the "Calculator" title for 3 seconds.</li>
+                    </ul>
+
+                    <h3 style="margin-top: 1.5rem;">Emergency Reset</h3>
+                    <p>If you forget your access method, you can reset to the default (Triple Tap AC) by tapping the "AC" button 3 times and holding.</p>
+                </section>
+
+                <hr class="section-divider">
+
+                <!-- Web Guide -->
+                <section id="web-guide" class="doc-section">
+                    <h2 class="doc-heading">Web Portal</h2>
+                    <p>Access your secure chats from any browser at <code>app.innerorbit.io</code>.</p>
+                    
+                    <ul class="feature-list">
+                        <li><strong>Universal Access:</strong> Works on Chrome, Safari, Firefox, and Edge.</li>
+                        <li><strong>PWA Support:</strong> Install as a Progressive Web App (PWA) for a native-like experience on desktop or mobile browsers.</li>
+                        <li><strong>Sync:</strong> Messages sync in real-time with your mobile device.</li>
+                    </ul>
+                </section>
+
+                <hr class="section-divider">
+
+                <!-- Desktop Guide -->
+                <section id="desktop-guide" class="doc-section">
+                    <h2 class="doc-heading">Desktop Application</h2>
+                    <p>The native desktop app offers the most robust experience for power users on Windows and macOS.</p>
+                    
+                    <ul class="feature-list">
+                        <li><strong>Native Notifications:</strong> Integrated system notifications.</li>
+                        <li><strong>Background Running:</strong> Minimize to tray to keep receiving messages without the window open.</li>
+                        <li><strong>Startup:</strong> Option to launch automatically on system startup.</li>
+                    </ul>
+                </section>
+
+                <hr class="section-divider">
+
+                <!-- Quick Start Section -->
+                <section id="quickstart" class="doc-section">
+                <h2 class="doc-heading">Quick Start Guide</h2>
+                
+                <div class="steps-container">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Create Account</h3>
+                            <p>Sign up with your email or use anonymous registration. You'll receive a unique 4-digit ID.</p>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Share Your ID</h3>
+                            <p>Share your 4-digit user ID with friends. They can add you by entering your ID in the search bar.</p>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Start Messaging</h3>
+                            <p>Begin secure conversations. All messages are automatically encrypted end-to-end.</p>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <h3>Customize Settings</h3>
+                            <p>Configure privacy, notifications, disappearing messages, and other preferences.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Account Setup Section -->
+            <section id="account" class="doc-section">
+                <h2 class="doc-heading">Account Setup</h2>
+                
+                <h3>Creating Your Account</h3>
+                <p>InnerOrbit offers flexible account creation options:</p>
+                
+                <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+                    <div class="feature-item" style="padding: 1.5rem;">
+                        <h4 style="color: var(--accent-color); margin-bottom: 1rem;">1. Anonymous Registration</h4>
+                        <ul style="list-style: none; padding: 0; margin: 0; color: var(--text-secondary);">
+                            <li style="margin-bottom: 0.5rem;">• <strong>Email:</strong> Not required</li>
+                            <li style="margin-bottom: 0.5rem;">• <strong>ID:</strong> Auto-generated 4-digit ID</li>
+                            <li style="margin-bottom: 0.5rem;">• <strong>PIN:</strong> Auto-generated 6-digit PIN</li>
+                            <li>• <strong>Privacy:</strong> Maximum</li>
+                        </ul>
+                    </div>
+
+                    <div class="feature-item" style="padding: 1.5rem;">
+                        <h4 style="color: var(--accent-color); margin-bottom: 1rem;">2. Email Registration</h4>
+                        <ul style="list-style: none; padding: 0; margin: 0; color: var(--text-secondary);">
+                            <li style="margin-bottom: 0.5rem;">• <strong>Email:</strong> Required</li>
+                            <li style="margin-bottom: 0.5rem;">• <strong>Password:</strong> 8+ characters</li>
+                            <li style="margin-bottom: 0.5rem;">• <strong>Recovery:</strong> Available via email</li>
+                            <li>• <strong>Security:</strong> Standard</li>
+                        </ul>
+                    </div>
+
+                    <div class="feature-item" style="padding: 1.5rem;">
+                        <h4 style="color: var(--accent-color); margin-bottom: 1rem;">3. Social Login</h4>
+                        <ul style="list-style: none; padding: 0; margin: 0; color: var(--text-secondary);">
+                            <li style="margin-bottom: 0.5rem;">• Google OAuth</li>
+                            <li style="margin-bottom: 0.5rem;">• Microsoft Account</li>
+                            <li>• Apple ID (iOS only)</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <h3 id="account-security" style="margin-top: 3rem;">Securing Your Account</h3>
+                <ul class="feature-list">
+                    <li><strong>Enable Biometric Authentication:</strong> Use fingerprint or face recognition for quick access</li>
+                    <li><strong>Set a Strong PIN:</strong> Change your auto-generated PIN to something memorable but secure</li>
+                    <li><strong>Enable Two-Factor Authentication:</strong> Add an extra layer of security to your account</li>
+                    <li><strong>Review Active Sessions:</strong> Check devices accessing your account and sign out from remote locations</li>
+                    <li><strong>Keep Recovery Keys Safe:</strong> Store your recovery codes in a secure location</li>
+                </ul>
+
+                <h3 id="profile" style="margin-top: 2rem;">Profile Customization</h3>
+                <ul class="feature-list">
+                    <li><strong>Profile Picture:</strong> Add an avatar (optional, for privacy)</li>
+                    <li><strong>Bio:</strong> Write a short bio or status message (up to 150 characters)</li>
+                    <li><strong>Status:</strong> Set your availability status (Online, Away, Do Not Disturb)</li>
+                    <li><strong>Display Name:</strong> Choose how your name appears to contacts</li>
+                </ul>
+            </section>
+
+            <!-- Messaging Section -->
+            <section id="messaging" class="doc-section">
+                <h2 class="doc-heading">Messaging Guide</h2>
+                
+                <h3>Sending Messages</h3>
+                <ol class="feature-list">
+                    <li>Open a conversation or create a new one</li>
+                    <li>Type your message in the input field</li>
+                    <li>Optionally set disappearing timer or reply to a message</li>
+                    <li>Press Send or tap the send button</li>
+                </ol>
+
+                <h3 style="margin-top: 1.5rem;">Message Features</h3>
+                <div class="features-list-detailed">
+                    <div class="feature-item-detailed">
+                        <strong>Replies & Threading</strong> - Quote and reply to specific messages to keep conversations organized
+                    </div>
+                    <div class="feature-item-detailed">
+                        <strong>Message Reactions</strong> - React with emoji to messages without cluttering the chat
+                    </div>
+                    <div class="feature-item-detailed">
+                        <strong>Disappearing Messages</strong> - Messages automatically delete after the set time period
+                    </div>
+                    <div class="feature-item-detailed">
+                        <strong>Edit Messages</strong> - Modify sent messages (marked as edited)
+                    </div>
+                    <div class="feature-item-detailed">
+                        <strong>Delete Messages</strong> - Remove messages for yourself or everyone
+                    </div>
+                    <div class="feature-item-detailed" id="media">
+                        <strong>Media Sharing</strong> - Send photos, videos, and files securely
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 1.5rem;">Message Status Indicators</h3>
+                <div class="status-list" style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 1.5rem;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.8rem;">
+                        <span style="width: 30px; font-weight: bold; color: var(--text-primary);">✓</span>
+                        <span style="color: var(--text-secondary);">Message sent to server</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin-bottom: 0.8rem;">
+                        <span style="width: 30px; font-weight: bold; color: var(--text-primary);">✓✓</span>
+                        <span style="color: var(--text-secondary);">Message delivered to device</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin-bottom: 0.8rem;">
+                        <span style="width: 30px; font-weight: bold; color: var(--accent-color);">✓✓</span>
+                        <span style="color: var(--text-secondary);">Recipient has read the message</span>
+                    </div>
+                    <div style="display: flex; align-items: center; margin-bottom: 0.8rem;">
+                        <span style="width: 30px;">🔒</span>
+                        <span style="color: var(--text-secondary);">Message is encrypted end-to-end</span>
+                    </div>
+                    <div style="display: flex; align-items: center;">
+                        <span style="width: 30px;">⏱️</span>
+                        <span style="color: var(--text-secondary);">Message will disappear soon</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Security Features Section -->
+            <section id="security" class="doc-section">
+                <h2 class="doc-heading">Security Features</h2>
+                
+                <div class="security-features">
+                    <div class="security-card">
+                        <h3>End-to-End Encryption</h3>
+                        <p>All messages are encrypted using AES-256 with device-specific keys. Only you and your recipient can decrypt messages.</p>
+                        <div class="tech-spec" style="font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">Algorithm: AES-256-GCM | Key Derivation: PBKDF2</div>
+                    </div>
+
+                    <div class="security-card">
+                        <h3>Perfect Forward Secrecy</h3>
+                        <p>Each conversation has unique ephemeral keys that rotate automatically. Old messages cannot be decrypted even if a key is compromised.</p>
+                        <div class="tech-spec" style="font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">Key Rotation: Per conversation | Timestamp-based</div>
+                    </div>
+
+                    <div class="security-card">
+                        <h3>🛡️ Device Security</h3>
+                        <p>Encryption keys are stored securely on your device using platform-specific secure storage (Keychain on iOS, Keystore on Android).</p>
+                        <div class="tech-spec" style="font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">Storage: Device-local | Protected by OS-level security</div>
+                    </div>
+
+                    <div class="security-card">
+                        <h3>✔️ Safety Numbers</h3>
+                        <p>Verify the identity of your contacts using safety numbers. Compare 12-character fingerprints to ensure secure conversations.</p>
+                        <div class="tech-spec" style="font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">Format: XXXXX XXXXX XXXXX (Signal-style)</div>
+                    </div>
+
+                    <div class="security-card">
+                        <h3>🚫 Screenshot Detection</h3>
+                        <p>On supported platforms, receive alerts when someone attempts to screenshot your conversation.</p>
+                        <div class="tech-spec" style="font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">Supported: iOS, Android | Optional: Can be disabled</div>
+                    </div>
+
+                    <div class="security-card">
+                        <h3>🔗 Secure Connections</h3>
+                        <p>All communications use TLS 1.3 encryption for transport security. Connections are authenticated with SSL certificates.</p>
+                        <div class="tech-spec" style="font-size: 0.85rem; color: var(--text-tertiary); margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">Protocol: TLS 1.3 | Certificate Pinning: Enabled</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Privacy Settings Section -->
+            <section id="privacy" class="doc-section">
+                <h2 class="doc-heading">Privacy Settings</h2>
+                
+                <h3>Available Privacy Controls</h3>
+                <div class="privacy-settings">
+                    <div class="setting">
+                        <h4>Online Status</h4>
+                        <p>Control whether contacts can see when you're online. Options: Always Show, Always Hide, Show to Friends Only</p>
+                    </div>
+
+                    <div class="setting">
+                        <h4>Last Seen</h4>
+                        <p>Choose who can see when you were last active. Options: Everyone, Contacts Only, Nobody</p>
+                    </div>
+
+                    <div class="setting">
+                        <h4>Read Receipts</h4>
+                        <p>Let contacts know if you've read their messages. Can be toggled globally or per conversation.</p>
+                    </div>
+
+                    <div class="setting">
+                        <h4>Profile Visibility</h4>
+                        <p>Control who can see your profile, bio, and photo. Options: Public, Contacts Only, Private</p>
+                    </div>
+
+                    <div class="setting">
+                        <h4>Data Collection</h4>
+                        <p>Opt in or out of analytics and usage data collection. Your messages are never collected.</p>
+                    </div>
+
+                    <div class="setting">
+                        <h4>Ad Preferences</h4>
+                        <p>Control which types of ads you see. InnerOrbit is ad-free, but you can still manage third-party trackers.</p>
+                    </div>
+                </div>
+
+                <div class="warning-box" style="margin-top: 2rem;">
+                    <strong>Privacy Tip:</strong> Enable "Maximum Privacy" mode to disable all optional data collection and get the most private experience.
+                </div>
+            </section>
+
+            <!-- Encryption Section -->
+            <section id="encryption" class="doc-section">
+                <h2 class="doc-heading">Technical: End-to-End Encryption</h2>
+                
+                <h3>How Encryption Works</h3>
+                <div class="encryption-flow">
+                    <div class="flow-step">
+                        <div class="step-marker">1</div>
+                        <strong>Message Entered</strong>
+                        <p>You type a message in the app</p>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="step-marker">2</div>
+                        <strong>Key Generation</strong>
+                        <p>App derives encryption key from conversation ID and participant UIDs</p>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="step-marker">3</div>
+                        <strong>Encryption</strong>
+                        <p>Message encrypted with AES-256 using the derived key</p>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="step-marker">4</div>
+                        <strong>Transmission</strong>
+                        <p>Encrypted message sent over TLS to servers</p>
+                    </div>
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-step">
+                        <div class="step-marker">5</div>
+                        <strong>Decryption</strong>
+                        <p>Recipient's app decrypts using the same derived key</p>
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 2rem;">How Your Data is Protected</h3>
+                <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); margin-top: 1.5rem;">
+                    <div class="feature-item">
+                        <h4>Key Derivation (PBKDF2)</h4>
+                        <p>We use PBKDF2 to generate unique encryption keys for every conversation. This process combines your unique device identifiers with random data ("salt") to ensure that keys cannot be guessed or brute-forced.</p>
+                    </div>
+                    
+                    <div class="feature-item">
+                        <h4>AES-256-GCM Encryption</h4>
+                        <p>Messages are locked using AES-256, a military-grade encryption standard. The "GCM" mode ensures that if anyone tries to tamper with a message while it's being sent, the app will reject it immediately.</p>
+                    </div>
+                </div>
+            </section>
+
+
+
+            <!-- FAQ Section -->
+            <section id="faq" class="doc-section">
+                <h2 class="doc-heading">Frequently Asked Questions</h2>
+                
+                <div class="faq-list">
+                    <details class="faq-item">
+                        <summary>What is my 4-digit User ID and how is it different from my PIN?</summary>
+                        <div class="faq-content">
+                            <p>Your <strong>User ID</strong> (e.g., 1234) is your public identifier that you share with others to receive messages. Your <strong>PIN</strong> (e.g., 123456) is a private 6-digit code that you use to login along with your User ID. Never share your PIN with anyone.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Are my messages really encrypted end-to-end?</summary>
+                        <div class="faq-content">
+                            <p>Yes! Every message is encrypted with military-grade AES-256 encryption on your device before it's sent. The servers never have access to the plaintext of your messages. Only you and the recipient can decrypt and read the messages.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>What happens when I enable disappearing messages?</summary>
+                        <div class="faq-content">
+                            <p>Once you set a disappearing timer (5 seconds, 1 hour, or 24 hours), any messages sent in that conversation will automatically delete from both sides after the timer expires. Note: Messages deleted from the server are still visible in local storage until refreshed.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Can I recover a deleted account?</summary>
+                        <div class="faq-content">
+                            <p>Account recovery depends on how you deleted it. If you used email registration, you can recover your account within 30 days. For anonymous accounts, deletion is permanent. Always save your recovery codes in a safe location.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>How do safety numbers work?</summary>
+                        <div class="faq-content">
+                            <p>Safety numbers are 12-character fingerprints unique to each conversation. You can view and verify them with your contact through an out-of-band method (call, video, in person). If the numbers don't match, it could indicate a security issue. This is optional but recommended for highly sensitive communications.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Is InnerOrbit free to use?</summary>
+                        <div class="faq-content">
+                            <p>Yes! InnerOrbit is completely free to download and use. We don't have ads, and we don't charge for messaging or premium features. We may offer optional premium features in the future, but core functionality will always be free.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>What platforms does InnerOrbit support?</summary>
+                        <div class="faq-content">
+                            <p>InnerOrbit is available on: iOS (Apple App Store), Android (Google Play Store), Web (https://app.innerorbit.io), Windows (Desktop app), and macOS (Desktop app). All versions sync seamlessly.</p>
+                        </div>
+                    </details>
+
+                    <details class="faq-item">
+                        <summary>Can I use InnerOrbit offline?</summary>
+                        <div class="faq-content">
+                            <p>Yes! InnerOrbit has offline support. You can compose messages offline, and they'll be sent automatically when your connection is restored. This works on both mobile and web versions.</p>
+                        </div>
+                    </details>
+                </div>
+            </section>
+
+            <!-- Troubleshooting Section -->
+            <section id="troubleshooting" class="doc-section">
+                <h2 class="doc-heading">Troubleshooting</h2>
+                
+                <div class="troubleshooting-items">
+                    <div class="troubleshooting-item">
+                        <h3>❌ Messages Not Sending</h3>
+                        <p><strong>Solution:</strong> Check your internet connection. Ensure the app has permission to access the network. Try refreshing the conversation or restarting the app.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ Can't Find a Contact</h3>
+                        <p><strong>Solution:</strong> Make sure you have the correct 4-digit User ID. User IDs are non-sequential and don't follow patterns. Check the exact spelling/numbers with your contact.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ Messages Appear Encrypted</h3>
+                        <p><strong>Solution:</strong> This usually means a key derivation issue. Try: 1) Log out and log back in, 2) Clear app cache, 3) Reinstall the app if issue persists.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ Notifications Not Working</h3>
+                        <p><strong>Solution:</strong> Check app notification settings in your device Settings. Grant InnerOrbit permission to send notifications. Ensure "Do Not Disturb" mode is off.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ Sync Issues Across Devices</h3>
+                        <p><strong>Solution:</strong> Ensure you're logged into the same account on all devices. Check your internet connection on all devices. Sometimes it takes a few seconds to sync.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ Forgot My PIN</h3>
+                        <p><strong>Solution:</strong> Use the "Forgot PIN?" option on the login screen. If you can't recover it, delete the account and create a new one with a new PIN.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ App Crashes on Startup</h3>
+                        <p><strong>Solution:</strong> 1) Force close the app, 2) Clear cache from Settings, 3) Restart your device, 4) Reinstall the app if issue persists.</p>
+                    </div>
+
+                    <div class="troubleshooting-item">
+                        <h3>❌ High Battery Drain</h3>
+                        <p><strong>Solution:</strong> Disable location services for InnerOrbit if not needed. Reduce notification frequency. Check if background refresh is enabled unnecessarily.</p>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <strong>Still having issues?</strong> Jump to the <a href="#contact" class="link">Contact & Support</a> section below.
+                </div>
+            </section>
+
+            <!-- Contact & Support Section -->
+            <section id="contact" class="doc-section">
+                <h2 class="doc-heading">Contact & Support</h2>
+                
+                <div class="support-channels">
+                    <div class="channel">
+                        <div class="channel-icon">📧</div>
+                        <h3>Email Support</h3>
+                        <p>support@innerorbit.io</p>
+                        <p class="channel-detail">Response time: 24-48 hours</p>
+                    </div>
+
+                    <div class="channel">
+                        <div class="channel-icon">💬</div>
+                        <h3>Live Chat</h3>
+                        <p>Available in the app settings</p>
+                        <p class="channel-detail">Response time: 5-15 minutes (Business hours)</p>
+                    </div>
+
+                    <div class="channel">
+                        <div class="channel-icon">🐦</div>
+                        <h3>Social Media</h3>
+                        <p>@InnerOrbit on Twitter, Facebook, Instagram</p>
+                        <p class="channel-detail">Response time: 24 hours</p>
+                    </div>
+
+                    <div class="channel">
+                        <div class="channel-icon">🔗</div>
+                        <h3>Community Forum</h3>
+                        <p>forum.innerorbit.io</p>
+                        <p class="channel-detail">Community-driven Q&A</p>
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 2rem;">Bug Reports & Feature Requests</h3>
+                <p>We welcome your feedback! To report a bug or request a feature:</p>
+                <ol class="feature-list">
+                    <li>Go to Settings → Help & Support → Report a Bug</li>
+                    <li>Describe the issue in detail with steps to reproduce</li>
+                    <li>Include your app version and device information</li>
+                    <li>Our team will investigate and follow up with you</li>
+                </ol>
+
+                <div class="success-box">
+                    <strong>✨ Thank you for using InnerOrbit!</strong> Your feedback helps us build a better, more secure messaging platform.
+                </div>
+            </section>
+
+            <!-- Release Notes Section -->
+            <section id="release-notes" class="doc-section">
+                <h2 class="doc-heading">Release Notes</h2>
+                <p class="doc-subtitle-section">Latest updates and improvements to InnerOrbit.</p>
+                
+                <div class="version-card" style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="margin: 0;">v1.0.0 (Public Beta)</h3>
+                        <span style="background: var(--accent-color); color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem;">Current</span>
+                    </div>
+                    <p style="margin-bottom: 1rem;">Initial public release featuring core stealth messaging capabilities.</p>
+                    <ul style="list-style: none; padding: 0;">
+                        <li style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;"><span style="color: var(--success-color);">+</span> Stealth Calculator Mode (Mobile)</li>
+                        <li style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;"><span style="color: var(--success-color);">+</span> End-to-End Encryption (AES-256)</li>
+                        <li style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;"><span style="color: var(--success-color);">+</span> Cross-platform Sync (Web/Desktop)</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Roadmap Section -->
+            <section id="roadmap" class="doc-section">
+                <h2 class="doc-heading">Feature Roadmap</h2>
+                <p class="doc-subtitle-section">What we're working on next.</p>
+                
+                <div class="roadmap-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem;">
+                    <div class="roadmap-item" style="border-left: 3px solid var(--accent-color); padding-left: 1rem;">
+                        <h4 style="margin-bottom: 0.5rem;">Q2 2026</h4>
+                        <p style="margin-bottom: 0;">Voice & Video Calls</p>
+                        <p style="font-size: 0.9rem; color: var(--text-tertiary);">Secure P2P calling</p>
+                    </div>
+                    <div class="roadmap-item" style="border-left: 3px solid var(--text-tertiary); padding-left: 1rem;">
+                        <h4 style="margin-bottom: 0.5rem;">Q3 2026</h4>
+                        <p style="margin-bottom: 0;">Group Chats</p>
+                        <p style="font-size: 0.9rem; color: var(--text-tertiary);">Encrypted groups up to 50 users</p>
+                    </div>
+                    <div class="roadmap-item" style="border-left: 3px solid var(--text-tertiary); padding-left: 1rem;">
+                        <h4 style="margin-bottom: 0.5rem;">Q4 2026</h4>
+                        <p style="margin-bottom: 0;">File Vault</p>
+                        <p style="font-size: 0.9rem; color: var(--text-tertiary);">Secure local storage</p>
+                    </div>
+                </div>
+            </section>
+
+                <!-- References -->
+                <div class="design-subsection" style="margin-top: 2rem;">
+                    <h3>Reference Standards & Guidelines</h3>
+                    <ul class="reference-list">
+                        <li><a href="https://www.w3.org/TR/WCAG22/" target="_blank">WCAG 2.2 Accessibility Guidelines</a> - Web accessibility standards</li>
+                        <li><a href="https://www.nngroup.com/articles/" target="_blank">Nielsen Norman Group UX Articles</a> - Evidence-based UX research</li>
+                        <li><a href="https://m3.material.io/" target="_blank">Google Material Design 3</a> - Component specs and patterns</li>
+                        <li><a href="https://developer.apple.com/design/human-interface-guidelines/" target="_blank">Apple Human Interface Guidelines</a> - Platform design standards</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Footer -->
+            <div class="doc-footer" style="border-top: 1px solid var(--border-color); padding-top: 3rem; margin-top: 3rem; text-align: center; color: var(--text-secondary);">
+                <p>InnerOrbit © 2026 | Documentation v1.0</p>
+                <div style="margin-top: 1rem;">
+                    <a href="#overview" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Top</a>
+                    <a href="index.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Back to Portal</a>
+                    <a href="#contact" style="color: var(--text-secondary); text-decoration: none; margin: 0 1rem;">Contact</a>
+                </div>
+            </div>
+            
+            <!-- Table of Contents (Right Sidebar) -->
+            <aside class="toc-sidebar">
+                <div class="toc-container">
+                    <h4>On this page</h4>
+                    <ul class="toc-list">
+                        <li><a href="#overview">Overview</a></li>
+                        <li><a href="#features">Key Features</a></li>
+                        <li><a href="#installation">Installation</a></li>
+                        <li><a href="#quickstart">Quick Start</a></li>
+                        <li><a href="#messaging">Messaging</a></li>
+                        <li><a href="#security">Security</a></li>
+                        <li><a href="#infrastructure">Infrastructure</a></li>
+                        <li><a href="#ui-design">UI Design</a></li>
+                    </ul>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Footer (Matching portal) -->
+    <footer class="bg-footer" style="background: #1e293b; border-top: 1px solid rgba(168, 85, 247, 0.2); padding: 2rem; text-align: center; color: #94a3b8; font-size: 0.875rem;">
+        <div class="container">
+            <p>&copy; 2026 InnerOrbit. All rights reserved. Privacy First, Always.</p>
+        </div>
+    </footer>
+
+    <!-- Scripts -->
+    <script>
+        // Simple Tab Switcher (Global)
+        window.switchTab = function(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            
+            const targetContent = document.getElementById(tabId);
+            if (targetContent) targetContent.classList.add('active');
+            
+            // Find the button that was clicked
+            const btn = event.target.closest('.tab-btn');
+            if (btn) btn.classList.add('active');
+        };
+
+        // Sidebar link active state
+        document.querySelectorAll('.sidebar-link').forEach(link => {
+            link.addEventListener('click', function() {
+                document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+
+        // Tab functionality
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', function() {
+                const tabName = this.dataset.tab;
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById('tab-' + tabName).classList.add('active');
+                document.querySelectorAll('.tab-button').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                this.classList.add('active');
+            });
+        });
+
+        // Search functionality
+        const searchBtn = document.getElementById('searchBtn');
+        const searchPanel = document.getElementById('searchPanel');
+        const closeSearchBtn = document.getElementById('closeSearchBtn');
+        const searchInput = document.getElementById('searchInput');
+
+        if (searchBtn && searchPanel && closeSearchBtn && searchInput) {
+            searchBtn.addEventListener('click', () => {
+                searchPanel.classList.add('active');
+                searchInput.focus();
+            });
+
+            closeSearchBtn.addEventListener('click', () => {
+                searchPanel.classList.remove('active');
+            });
+
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.toLowerCase();
+                if (query.length < 2) {
+                    document.getElementById('searchResults').innerHTML = '';
+                    return;
+                }
+
+                const sections = document.querySelectorAll('.doc-section');
+                const results = [];
+
+                sections.forEach(section => {
+                    const text = section.innerText.toLowerCase();
+                    if (text.includes(query)) {
+                        const heading = section.querySelector('h1, h2');
+                        if (heading) {
+                            results.push({
+                                title: heading.innerText,
+                                id: section.id,
+                                excerpt: text.substring(0, 100) + '...'
+                            });
+                        }
+                    }
+                });
+
+                const resultsHtml = results.map(r => 
+                    `<a href="#${r.id}" class="search-result">
+                        <div class="result-title">${r.title}</div>
+                        <div class="result-excerpt">${r.excerpt}</div>
+                    </a>`
+                ).join('');
+
+                document.getElementById('searchResults').innerHTML = resultsHtml || '<div class="no-results">No results found</div>';
+            });
+        }
+
+        // Smooth scrolling for section links
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({ behavior: 'smooth' });
+                }
+            });
+        });
+
+        // Highlight code blocks
+        document.querySelectorAll('pre code').forEach(el => {
+            hljs.highlightElement(el);
+        });
+
+        // Sidebar Dropdown Toggle
+        document.querySelectorAll('.nav-toggle').forEach(toggle => {
+            toggle.addEventListener('click', () => {
+                // Toggle active class on button
+                toggle.classList.toggle('active');
+                
+                // Toggle active class on dropdown
+                const dropdown = toggle.nextElementSibling;
+                if (dropdown && dropdown.classList.contains('nav-dropdown')) {
+                    dropdown.classList.toggle('active');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

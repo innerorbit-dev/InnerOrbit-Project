@@ -1,0 +1,96 @@
+# INNERORBIT VISUAL DESIGN GUIDE (CSS PROPERTIES)
+# --------------------------------------------------
+# This document tracks the core styling and layout properties used across 
+# the InnerOrbit Mobile & Web applications.
+
+==================================================
+1. GLOBAL AUTHENTICATION THEME (shared)
+File: components/split-auth-layout.js
+==================================================
+
+[BACKGROUND GRADIENTS - WEB/DESKTOP]
+- Left Skewed Panel:
+    - skewX: '-12deg'
+    - shadow: Opacity 0.5, Radius 20
+- Primary Theme (Email/Login): 
+    - Left: ["#0f172a", "#4c1d95"] (Slate -> Deep Violet)
+    - Right: ["#0f172a", "#6a2b2be3"] (Slate -> Deep Pink)
+- Secondary Theme (PIN Login):
+    - Left: ["#0f172a", "#4c1d95"] (Slate -> Deep Violet - Locked)
+    - Right: ["#0f172a", "#1d4ed8"] (Slate -> Royal Blue)
+- Signup Theme:
+    - Left: ["#0f172a", "#b91c1c"] (Slate -> Crimson Red)
+    - Right: ["#450a0a", "#e97d62e5"] (Dark Red -> Sunset Red)
+
+[FORMS & CARDS]
+- formCard (Auth Screens):
+    - backgroundColor: 'rgba(25, 8, 12, 0.4)'
+    - borderRadius: 24
+    - backdropFilter: 'blur(16px)' (Web)
+    - borderColor: 'rgba(251, 113, 133, 0.2)' (Rose Alpha)
+- inputContainer:
+    - borderRadius: 16
+    - borderWidth: 1
+    - paddingVertical: 16
+- infoTitle (Typography):
+    - fontSize: 42
+    - fontFamily: "Outfit_700Bold"
+    - lineHeight: 48
+
+==================================================
+2. CALCULATOR & GAME INTERFACE
+File: components/Calculator.js
+==================================================
+
+[DESIGN SYSTEM TOKENS]
+- borderRadius (calcBtn): 32 (Perfect Pill Shaping)
+- borderRadius (modalContent): 32 (Modern Fluid UI)
+- glassmorphism (Modal):
+    - backgroundColor: 'rgba(15, 23, 42, 0.75)' (Dark)
+    - backgroundColor: 'rgba(255, 255, 255, 0.85)' (Light)
+    - blurEffect: backdropFilter 'blur(20px)' (Web)
+
+[BRANDING]
+- INNERORBIT Text (Footer):
+    - color: '#FB923C' (Vibrant Orange)
+    - textShadowColor: 'rgba(251, 146, 60, 0.6)'
+    - textShadowRadius: 15
+
+[GAME SWITCHER]
+- Container:
+    - backgroundColor: 'rgba(15, 23, 42, 0.8)'
+    - borderRadius: 25
+    - paddingVertical: 4
+- Switch Buttons:
+    - paddingVertical: 4
+    - activeBg: 'rgba(0, 240, 255, 0.2)'
+- Text Styling:
+    - fontSize: 18
+    - fontWeight: '700'
+    - letterSpacing: 0.5
+
+==================================================
+3. TIC-TAC-TOE GAME ENGINE
+File: components/Calculator.js
+==================================================
+
+[GRID DESIGN]
+- gridLines: 1px Alpha Slate/Cyan
+- squares:
+    - width/height: Responsive (Min 100 on Mobile)
+    - borderColor: Theme-aware Slate
+- marks (X/O):
+    - X Color: 'Cyber Cyan'
+    - O Color: 'Neon Pink'
+    - glow: textShadowRadius: 10
+
+==================================================
+4. PLATFORM-SPECIFIC MARGINS
+==================================================
+
+- Login Header (Forgot Password):
+    - WEB: marginTop: 40
+    - MOBILE: marginTop: 0
+- Auth Layout Content Wrapper:
+    - WEB (Desktop): paddingLeft: 280, paddingRight: 120 (Centered Split)
+    - MOBILE: paddingHorizontal: 20

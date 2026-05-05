@@ -1,0 +1,989 @@
+/** Purpose: Data access layer for Firestore (CRUD for users, conversations, messages, reactions, and nicknames). */
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  addDoc,
+  onSnapshot,
+  Timestamp,
+  deleteDoc,
+  serverTimestamp,
+  runTransaction,
+  limit,
+  orderBy,
+  increment,
+  updateDoc
+} from "firebase/firestore";
+import { auth, db, storage } from "./firebase";
+import { ref as storageRefFn, uploadBytes, getDownloadURL, listAll, deleteObject } from "firebase/storage";
+import { Logger } from "./logger";
+
+/**
+ * Firestore Service Module for InnerOrbit
+ * Handles all database operations for users, conversations, and messages
+ */
+
+// Collection names
+const USERS_COLLECTION = "users";
+const CONVERSATIONS_COLLECTION = "conversations";
+const MESSAGES_SUBCOLLECTION = "messages";
+const DEFAULT_ENCRYPTION_CAPABILITIES = {
+  v5: true,
+  minReadable: 1,
+  maxWritable: 5,
+};
+
+/**
+ * Creates or updates a user profile in Firestore
+ * @param user - Firebase Auth user object
+ * @returns Object containing the generated userId and pin
+ */
+export async function createUserProfile(user) {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, user.uid);
+
+    // 1. Check if profile exists BEFORE we do any work
+    const existingSnap = await getDoc(userRef);
+    if (existingSnap.exists()) {
+      const data = existingSnap.data();
+      if (data.userId && data.pin) {
+        if (!data.encryptionCapabilities) {
+          await setDoc(userRef, { encryptionCapabilities: DEFAULT_ENCRYPTION_CAPABILITIES }, { merge: true });
+        }
+        const sanitizedUid = user.uid ? `${user.uid.substring(0, 5)}...` : 'unknown';
+        Logger.log(`[Firestore] Profile already exists for ${sanitizedUid}. ID: ${data.userId}`);
+
+        // Calculate isReturningUser: true if lastSeen is older than 7 days
+        let isReturningUser = false;
+        if (data.lastSeen) {
+          try {
+            const lastSeenDate = data.lastSeen.toDate();
+            const oneWeekAgo = new Date();
+            oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+            if (lastSeenDate < oneWeekAgo) {
+              isReturningUser = true;
+              Logger.log(`[Firestore] User ${sanitizedUid} is RETURNING (Last seen: ${lastSeenDate.toISOString()})`);
+            }
+          } catch (e) {
+            Logger.warn("[Firestore] Failed to calculate isReturningUser:", e.message);
+          }
+        }
+
+        return {
+          userId: data.userId,
+          pin: data.pin,
+          isNewUser: false,
+          isReturningUser,
+          hasSetPassword: data.hasSetPassword || false
+        };
+      }
+    }
+
+    // 2. SAFETY CHECK: Abort ONLY if this is an OLD account with CORRUPT/PARTIAL data.
+    // If the doc is totally MISSING (existingSnap.exists() is false), we allow creation (Repair Mode).
+    const creationTime = user.metadata?.creationTime;
+    if (creationTime && !existingSnap.exists()) {
+      const createdDate = new Date(creationTime);
+      const isOldAccount = createdDate < new Date(Date.now() - 10 * 60 * 1000); // > 10 mins
+      if (isOldAccount) {
+        Logger.warn(`[Firestore] 🛠️ Repairing profile for OLD account (${creationTime}) - Doc was missing.`);
+      }
+      if (isOldAccount) {
+        Logger.warn(`[Firestore] 🛠️ Auto-repairing CORRUPTED profile for OLD account (${creationTime}). Adding missing identity.`);
+      }
+    }
+
+    // 3. PREPARE: Generate new identity if needed
+    const { generateUniqueUserId, generateUniquePin } = await import("./user-id-generator");
+    const userId = await generateUniqueUserId();
+    const pin = await generateUniquePin();
+
+    // 4. TRANSACTION: Atomic setup
+    return await runTransaction(db, async (transaction) => {
+      const freshSnap = await transaction.get(userRef);
+      if (freshSnap.exists() && freshSnap.data().userId) {
+        // Double check inside transaction
+        const d = freshSnap.data();
+        // Calculate isReturningUser even in transaction case
+        let isReturningUser = false;
+        if (d.lastSeen) {
+          try {
+            const lastSeenDate = d.lastSeen.toDate();
+            const oneWeekAgo = new Date();
+            oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+            if (lastSeenDate < oneWeekAgo) {
+              isReturningUser = true;
+            }
+          } catch (e) { }
+        }
+        return {
+          userId: d.userId,
+          pin: d.pin,
+          isNewUser: false,
+          isReturningUser,
+          hasSetPassword: d.hasSetPassword || false
+        };
+      }
+
+      transaction.set(userRef, {
+        uid: user.uid,
+        email: user.email,
+        userId: userId,
+        pin: pin,
+        hasSetPassword: false, // NEW: Track if Google users have set a backup password
+        encryptionCapabilities: DEFAULT_ENCRYPTION_CAPABILITIES,
+        createdAt: serverTimestamp(),
+        lastSeen: serverTimestamp(),
+      }, { merge: true });
+
+      const sanitizedUid = user.uid ? `${user.uid.substring(0, 5)}...` : 'unknown';
+      Logger.log(`[Firestore] ✅ Created NEW profile for ${sanitizedUid}: ${userId}`);
+      return { userId, pin, isNewUser: true, hasSetPassword: false };
+    });
+  } catch (error) {
+    Logger.error("Error creating user profile:", error);
+    throw error;
+  }
+}
+
+/**
+ * Retrieves a user profile by UID
+ * @param uid - User ID
+ * @returns User profile or null if not found
+ */
+export async function getUserProfile(uid) {
+  if (!uid) return null;
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    const userSnap = await getDoc(userRef);
+    return userSnap.exists() ? userSnap.data() : null;
+  } catch (error) {
+    // CRITICAL diagnostics for Motorola connectivity issues
+    const networkStatus = typeof navigator !== 'undefined' && navigator.onLine ? "ONLINE" : "OFFLINE (Browser/Navigator)";
+    Logger.error(`[Firestore Error] Failed to fetch profile for UID: ${uid}`);
+    Logger.error(`[Firestore Error] Message: ${error.message}`);
+    Logger.error(`[Firestore Error] Code: ${error.code}`);
+    Logger.error(`[Firestore Error] Device Browser State: ${networkStatus}`);
+    Logger.error(`[Firestore Error] Auth Current User: ${auth.currentUser ? auth.currentUser.uid : "NONE"}`);
+
+    throw error;
+  }
+}
+
+/**
+ * Updates a user profile
+ * @param uid - User ID
+ * @param updates - Object containing fields to update (bio, photoURL, lastSeen, etc.)
+ */
+export async function updateUserProfile(uid, updates) {
+  if (!uid) return;
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    await setDoc(userRef, { ...updates, updatedAt: Timestamp.now() }, { merge: true });
+    Logger.log(`[Firestore] ✅ Updated profile for ${uid}`);
+  } catch (error) {
+    Logger.error("Error updating user profile:", error);
+    throw error;
+  }
+}
+
+
+/**
+ * Deletes a user profile (Account Deletion)
+ * @param uid - User ID to delete
+ */
+export async function deleteUserProfile(uid) {
+  if (!uid) return;
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    await deleteDoc(userRef);
+  } catch (error) {
+    Logger.error("Error deleting user profile:", error);
+    throw error;
+  }
+}
+
+/**
+ * Searches for users by email
+ * @param searchEmail - Email to search for
+ * @returns Array of matching user profiles
+ */
+export async function searchUsersByEmail(searchEmail) {
+  try {
+    const q = query(collection(db, USERS_COLLECTION), where("email", "==", searchEmail));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map((doc) => doc.data());
+  } catch (error) {
+    Logger.error("Error searching users:", error);
+    throw error;
+  }
+}
+
+/**
+ * Searches for a user by their 4-digit userId
+ * @param userId - 4-digit user ID to search for
+ * @returns User profile or null if not found
+ */
+export async function searchUserByUserId(userId) {
+  try {
+    const q = query(collection(db, USERS_COLLECTION), where("userId", "==", userId));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      return null;
+    }
+
+    const userDoc = querySnapshot.docs[0];
+    return {
+      uid: userDoc.id,
+      ...userDoc.data()
+    };
+  } catch (error) {
+    Logger.error("Error searching user by ID:", error);
+    throw error;
+  }
+}
+
+/**
+ * Creates a new conversation between two users
+ * @param userId1 - First user ID
+ * @param userId2 - Second user ID
+ * @returns Conversation ID
+ */
+export async function createConversation(userId1, userId2) {
+  try {
+    // Check if conversation already exists
+    const existingConv = await getConversationBetweenUsers(userId1, userId2);
+    if (existingConv) {
+      return existingConv.id;
+    }
+
+    // Create new conversation
+    const conversationRef = collection(db, CONVERSATIONS_COLLECTION);
+    const docRef = await addDoc(conversationRef, {
+      participantIds: [userId1, userId2],
+      createdAt: Timestamp.now(),
+    });
+
+    return docRef.id;
+  } catch (error) {
+    Logger.error("Error creating conversation:", error);
+    throw error;
+  }
+}
+
+/**
+ * Gets a conversation between two users
+ * @param userId1 - First user ID
+ * @param userId2 - Second user ID
+ * @returns Conversation or null if not found
+ */
+export async function getConversationBetweenUsers(userId1, userId2) {
+  try {
+    const currentUid = auth.currentUser?.uid;
+    // Security Rule Optimization: Always query by the current user's UID if they are one of the participants.
+    // This ensures we only "list" documents we actually have read access to.
+    const queryUid = (userId2 === currentUid) ? userId2 : userId1;
+
+    Logger.log(`[Firestore] Searching conversation (Querying by: ${queryUid.substring(0, 5)}...)`);
+
+    const q = query(
+      collection(db, CONVERSATIONS_COLLECTION),
+      where("participantIds", "array-contains", queryUid)
+    );
+
+    const querySnapshot = await getDocs(q);
+    const otherUid = (queryUid === userId1) ? userId2 : userId1;
+
+    const conversation = querySnapshot.docs.find((doc) => {
+      const data = doc.data();
+      return data.participantIds && Array.isArray(data.participantIds) && data.participantIds.includes(otherUid);
+    });
+
+    return conversation ? { id: conversation.id, ...conversation.data() } : null;
+  } catch (error) {
+    Logger.error(`Error getting conversation between ${userId1} and ${userId2}: ${error.message}`, error);
+    throw error;
+  }
+}
+
+/**
+ * Gets all conversations for a user
+ * @param userId - User ID
+ * @returns Array of conversations
+ */
+export async function getUserConversations(userId) {
+  if (!userId) return [];
+  try {
+    const q = query(
+      collection(db, CONVERSATIONS_COLLECTION),
+      where("participantIds", "array-contains", userId)
+    );
+
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+  } catch (error) {
+    Logger.error("Error getting conversations:", error);
+    throw error;
+  }
+}
+
+/**
+ * @param encryptedText - Encrypted message text (or image URL)
+ * @param replyTo - Optional object { id, text, senderName } for threading
+ * @param type - Message type: 'text' or 'image'
+ * @param scheduledSeconds - Seconds to delay the message send
+ * @param ephemeralDuration - Seconds the message lasts after being read (Receiver only)
+ * @returns Message ID
+ */
+export async function sendMessage(conversationId, senderId, encryptedText, replyTo = null, scheduledSeconds = 0, type = 'text', ephemeralDuration = 0, options = {}) {
+  try {
+    const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
+    const serverTime = Timestamp.now();
+    const { encVersion = null } = options || {};
+
+    const messageData = {
+      senderId,
+      encryptedText,
+      timestamp: serverTime,
+      status: 'sent', // 'sent', 'delivered', 'read'
+      replyTo, // Store the quoted message info
+      type, // 'text' or 'image'
+    };
+    if (encVersion) {
+      messageData.encVersion = encVersion;
+    }
+
+    if (scheduledSeconds > 0) {
+      messageData.scheduledAt = new Timestamp(serverTime.seconds + scheduledSeconds, serverTime.nanoseconds);
+      messageData.status = 'scheduled'; // Custom status for filtering
+    }
+
+    if (ephemeralDuration > 0) {
+      messageData.ephemeralDuration = ephemeralDuration;
+    }
+
+    const docRef = await addDoc(messagesRef, messageData);
+
+    // Update conversation's last message and increment unread count for recipient
+    const conversationRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+    
+    // We need to find the recipient to increment their specific counter
+    const convSnap = await getDoc(conversationRef);
+    if (convSnap.exists()) {
+      const convData = convSnap.data();
+      const recipientId = convData.participantIds?.find(id => id !== senderId);
+      
+      const updates = {
+        lastMessage: type === 'image' ? "📷 Image" : encryptedText,
+        lastMessageTime: serverTime,
+        lastMessageId: docRef.id,
+        lastMessageSenderId: senderId,
+        lastMessageStatus: 'sent',
+      };
+      if (encVersion && type === 'text') {
+        updates.lastMessageEncVersion = encVersion;
+      }
+
+      if (recipientId) {
+        updates[`unreadCount_${recipientId}`] = increment(1);
+      }
+
+      await updateDoc(conversationRef, updates);
+    }
+
+    Logger.log(`[Firestore] ✅ Message sent to conv: ${conversationId.substring(0, 5)}...`);
+    return docRef.id;
+  } catch (error) {
+    Logger.error("Error sending message:", error);
+    throw error;
+  }
+}
+
+/**
+ * Uploads an image to Firebase Storage
+ * @param uri - Local image URI
+ * @param conversationId - Conversation ID context
+ * @returns Download URL
+ */
+export async function uploadChatImage(uri, conversationId) {
+  try {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const filename = `chats/${conversationId}/${Date.now()}.jpg`;
+    const objectRef = storageRefFn(storage, filename);
+    await uploadBytes(objectRef, blob);
+    return await getDownloadURL(objectRef);
+  } catch (error) {
+    Logger.error("Error uploading image:", error);
+    throw error;
+  }
+}
+
+/**
+ * Uploads a profile picture to Firebase Storage
+ * @param uri - Local image URI
+ * @param uid - User UID context
+ * @returns Download URL
+ */
+export async function uploadProfilePicture(uri, uid) {
+  try {
+    const response = await fetch(uri);
+    const blob = await response.blob();
+    const filename = `profiles/${uid}/${Date.now()}.jpg`;
+    const objectRef = storageRefFn(storage, filename);
+    await uploadBytes(objectRef, blob);
+    return await getDownloadURL(objectRef);
+  } catch (error) {
+    Logger.error("Error uploading profile photo:", error);
+    throw error;
+  }
+}
+
+/**
+ * Updates a message (Edit)
+ */
+export async function updateMessage(conversationId, messageId, updates) {
+  try {
+    const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
+    await setDoc(msgRef, { ...updates, isEdited: true }, { merge: true });
+  } catch (error) {
+    Logger.error("Error updating message:", error);
+    throw error;
+  }
+}
+
+/**
+ * Deletes a message for everyone (Soft Delete)
+ */
+export async function deleteMessageForEveryone(conversationId, messageId) {
+  try {
+    const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
+    await setDoc(msgRef, { isDeleted: true, encryptedText: "" }, { merge: true });
+  } catch (error) {
+    Logger.error("Error deleting message:", error);
+    throw error;
+  }
+}
+
+/**
+ * Hard deletes a scheduled message before it arrives
+ */
+export async function hardDeleteMessage(conversationId, messageId) {
+  try {
+    const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
+    await deleteDoc(msgRef);
+  } catch (error) {
+    Logger.error("Error hard deleting message:", error);
+    throw error;
+  }
+}
+
+/**
+ * Hides a message for the current user (Delete for Me)
+ * This requires fetching current 'hiddenFor' array and appending
+ */
+export async function deleteMessageForMe(conversationId, messageId, userId) {
+  // This is complex without array-union helper imported, doing simple read-write
+  try {
+    const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
+    const snap = await getDoc(msgRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      const hiddenFor = data.hiddenFor || [];
+      if (!hiddenFor.includes(userId)) {
+        await setDoc(msgRef, { hiddenFor: [...hiddenFor, userId] }, { merge: true });
+      }
+    }
+  } catch (error) {
+    Logger.error("Error hiding message:", error);
+    throw error;
+  }
+}
+
+/**
+ * Gets all messages from a conversation
+ * @param conversationId - Conversation ID
+ * @returns Array of messages
+ */
+export async function getConversationMessages(conversationId) {
+  try {
+    const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
+    const querySnapshot = await getDocs(messagesRef);
+    return querySnapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+      .sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
+  } catch (error) {
+    Logger.error("Error getting messages:", error);
+    throw error;
+  }
+}
+
+/**
+ * Subscribes to real-time message updates for a conversation
+ * @param conversationId - Conversation ID
+ * @param callback - Function to call when messages update
+ * @returns Unsubscribe function
+ */
+export function subscribeToMessages(conversationId, callback) {
+  try {
+    const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
+    const q = query(messagesRef);
+
+    return onSnapshot(q, (querySnapshot) => {
+      const messages = querySnapshot.docs
+        .map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+        .sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
+
+      callback(messages);
+    });
+  } catch (error) {
+    Logger.error("Error subscribing to messages:", error);
+    throw error;
+  }
+}
+
+/**
+ * Subscribes to real-time conversation updates for a user
+ * @param userId - User ID
+ * @param callback - Function to call when conversations update
+ * @returns Unsubscribe function
+ */
+export function subscribeToConversations(userId, callback, onError) {
+  try {
+    const q = query(
+      collection(db, CONVERSATIONS_COLLECTION),
+      where("participantIds", "array-contains", userId)
+    );
+
+    return onSnapshot(q, (querySnapshot) => {
+      const conversations = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      callback(conversations);
+    }, (error) => {
+      Logger.error("Firestore subscription error:", error);
+      if (onError) onError(error);
+    });
+  } catch (error) {
+    Logger.error("Error subscribing to conversations:", error);
+    throw error;
+  }
+}
+
+/**
+ * Saves a custom nickname for a contact
+ * @param userId - Current user's ID
+ * @param contactUid - Contact's UID
+ * @param nickname - Custom nickname to set
+ */
+export async function saveContactNickname(userId, contactUid, nickname) {
+  try {
+    const contactRef = doc(db, USERS_COLLECTION, userId, "contacts", contactUid);
+    await setDoc(contactRef, { nickname }, { merge: true });
+    Logger.log(`[Firestore] ✅ Nickname set for ${contactUid.substring(0, 5)}...: ${nickname}`);
+  } catch (error) {
+    Logger.error("Error saving nickname:", error);
+    throw error;
+  }
+}
+
+/**
+ * Subscribes to the user's custom nicknames
+ * @param userId - Current user's ID
+ * @param callback - Function to call with the nicknames map { contactUid: nickname }
+ * @returns Unsubscribe function
+ */
+export function subscribeToContactNicknames(userId, callback) {
+  try {
+    const contactsRef = collection(db, USERS_COLLECTION, userId, "contacts");
+    return onSnapshot(contactsRef, (snapshot) => {
+      const nicknames = {};
+      snapshot.forEach((doc) => {
+        nicknames[doc.id] = doc.data().nickname;
+      });
+      callback(nicknames);
+    });
+  } catch (error) {
+    Logger.error("Error subscribing to nicknames:", error);
+    // Return dummy unsubscribe to prevent crashes
+    return () => { };
+  }
+}
+
+/**
+ * Deletes all messages in a conversation and optionally the images in storage
+ */
+export async function clearChatData(conversationId, deleteMedia = false) {
+  try {
+    // 1. Get all messages
+    const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
+    const snap = await getDocs(messagesRef);
+
+    // 2. Delete all message documents in Firestore
+    const deletePromises = snap.docs.map(mDoc => deleteDoc(doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, mDoc.id)));
+    await Promise.all(deletePromises);
+
+    // 3. Optionally delete all media in Storage for this conversation
+    if (deleteMedia) {
+      const folderRef = storageRefFn(storage, `chats/${conversationId}`);
+      const listRes = await listAll(folderRef);
+      const storageDeletes = listRes.items.map(item => deleteObject(item));
+      await Promise.all(storageDeletes);
+    }
+
+    // 4. Update conversation's last message
+    const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+    await setDoc(convRef, {
+      lastMessage: "Chat cleared",
+      lastMessageTime: serverTimestamp(),
+      lastMessageId: "",
+      lastMessageStatus: ""
+    }, { merge: true });
+
+    return true;
+  } catch (error) {
+    Logger.error("Error clearing chat data:", error);
+    throw error;
+  }
+}
+
+/**
+ * Deletes a conversation
+ * @param conversationId - ID of conversation to delete
+ */
+export async function deleteConversation(conversationId) {
+  try {
+    const ref = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+    await deleteDoc(ref);
+  } catch (error) {
+    Logger.error("Error deleting conversation:", error);
+    throw error;
+  }
+}
+
+/**
+ * Updates user presence status
+ * @param userId - User UID
+ * @param isOnline - Boolean status
+ */
+export async function updateUserPresence(userId, isOnline, silent = false) {
+  if (!userId) return;
+  try {
+    if (!silent) Logger.log(`[Firestore] Updating presence for ${userId} to ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    const data = {
+      isOnline,
+      lastSeen: Timestamp.now() // Use Client Time (2026) to match Date.now() checks
+    };
+    await setDoc(userRef, data, { merge: true });
+    if (!silent) Logger.log(`[Firestore] ✅ Presence updated successfully: ${userId} is now ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+  } catch (error) {
+    if (!silent) {
+      Logger.error(`[Firestore] ❌ Error updating presence for ${userId}:`, error);
+      Logger.error('[Firestore] Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+    throw error; // Re-throw to see in auth-context
+  }
+}
+
+/**
+ * Subscribes to a specific user's presence/status
+ * @param userId - Target User UID
+ * @param callback - Function(data) { isOnline, lastSeen }
+ */
+export function subscribeToUserPresence(userId, callback) {
+  if (!userId) return () => { };
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    return onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        callback({ isOnline: data.isOnline, lastSeen: data.lastSeen });
+      } else {
+        callback(null);
+      }
+    });
+  } catch (error) {
+    Logger.error("Error subscribing to presence:", error);
+    return () => { };
+  }
+}
+
+/**
+ * Marks a message as read
+ */
+export async function markMessageAsRead(conversationId, messageId) {
+  try {
+    const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
+    const msgSnap = await getDoc(msgRef);
+    if (msgSnap.exists()) {
+      const data = msgSnap.data();
+      const updates = { status: 'read' };
+
+      // Ephemeral Logic: If message has a read-timer, set expiresAt NOW
+      if (data.ephemeralDuration && data.ephemeralDuration > 0 && !data.expiresAt) {
+        const now = Timestamp.now();
+        updates.expiresAt = new Timestamp(now.seconds + data.ephemeralDuration, now.nanoseconds);
+      }
+
+      await setDoc(msgRef, updates, { merge: true });
+      Logger.log(`[Firestore] ✅ Message ${messageId.substring(0, 5)}... marked as read`);
+
+      // Update conversation if this is the last message
+      const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+      const convSnap = await getDoc(convRef);
+      if (convSnap.exists() && convSnap.data().lastMessageId === messageId) {
+        await setDoc(convRef, { lastMessageStatus: 'read' }, { merge: true });
+      }
+    }
+  } catch (error) {
+    Logger.error("Error marking message as read:", error);
+  }
+}
+
+/**
+ * Marks all 'sent' messages in a conversation as 'delivered'
+ * This is called when the recipient's app receives the message update (even in background/list view)
+ */
+export async function markMessagesAsDelivered(conversationId, recipientUserId) {
+  try {
+    const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
+
+    // Query for messages stuck in 'sent' that were NOT sent by me (the recipient)
+    const q = query(messagesRef, where("status", "==", "sent"));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) return;
+
+    const updates = [];
+
+    querySnapshot.docs.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (data.senderId !== recipientUserId) {
+        // It's an incoming message for me
+        updates.push(setDoc(docSnap.ref, { status: 'delivered' }, { merge: true }));
+      }
+    });
+
+    if (updates.length > 0) {
+      await Promise.all(updates);
+
+      // Update conversation lastMessageStatus if needed
+      const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+      const convSnap = await getDoc(convRef);
+      if (convSnap.exists()) {
+        const convData = convSnap.data();
+        if (convData.lastMessageStatus === 'sent' && convData.lastMessageSenderId !== recipientUserId) {
+          await setDoc(convRef, { lastMessageStatus: 'delivered' }, { merge: true });
+        }
+      }
+    }
+
+  } catch (error) {
+    Logger.error("Error marking messages as delivered:", error);
+  }
+}
+
+/**
+ * Toggles a reaction (emoji) on a message
+ */
+export async function toggleMessageReaction(conversationId, messageId, userId, emoji) {
+  try {
+    const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
+    const msgSnap = await getDoc(msgRef);
+    if (!msgSnap.exists()) return;
+
+    const data = msgSnap.data();
+    const reactions = data.reactions || {};
+
+    // Toggle user in the specific emoji array
+    if (reactions[emoji] && reactions[emoji].includes(userId)) {
+      reactions[emoji] = reactions[emoji].filter(id => id !== userId);
+      if (reactions[emoji].length === 0) delete reactions[emoji];
+    } else {
+      if (!reactions[emoji]) reactions[emoji] = [];
+      reactions[emoji].push(userId);
+    }
+
+    await setDoc(msgRef, { reactions }, { merge: true });
+  } catch (error) {
+    Logger.error("Error toggling reaction:", error);
+  }
+}
+
+/**
+ * Sends a connection request to another user
+ */
+export async function sendConnectionRequest(senderUid, receiverUid, senderInfo) {
+  try {
+    if (!senderUid || !receiverUid) {
+      throw new Error("Missing sender or receiver UID");
+    }
+
+    // Safety: ensure receiver exists
+    const receiverSnap = await getDoc(doc(db, USERS_COLLECTION, receiverUid));
+    if (!receiverSnap.exists()) {
+      throw new Error("Target user does not exist");
+    }
+    // 1. Check if already connected
+    const existingConv = await getConversationBetweenUsers(senderUid, receiverUid);
+    if (existingConv) return { status: 'already_connected', conversationId: existingConv.id };
+
+    // 2. Check for outgoing pending request
+    const q1 = query(
+      collection(db, "connectionRequests"),
+      where("senderId", "==", senderUid),
+      where("receiverId", "==", receiverUid),
+      where("status", "==", "pending")
+    );
+    const snap1 = await getDocs(q1);
+    if (!snap1.empty) return { status: 'request_sent_already' };
+
+    // 3. Check for incoming pending request
+    const q2 = query(
+      collection(db, "connectionRequests"),
+      where("senderId", "==", receiverUid),
+      where("receiverId", "==", senderUid),
+      where("status", "==", "pending")
+    );
+    const snap2 = await getDocs(q2);
+    if (!snap2.empty) {
+      // B already sent a request to A. Auto-accept it.
+      const requestId = snap2.docs[0].id;
+      await respondToConnectionRequest(requestId, 'accepted', receiverUid, senderUid);
+      return { status: 'success', autoAccepted: true };
+    }
+
+    // 4. Create new request
+    await addDoc(collection(db, "connectionRequests"), {
+      senderId: senderUid,
+      receiverId: receiverUid,
+      senderInfo: {
+        userId: senderInfo.userId,
+        uid: senderUid
+      },
+      status: 'pending',
+      createdAt: serverTimestamp(),
+    });
+
+    return { status: 'success' };
+  } catch (error) {
+    Logger.error("Error sending connection request:", error);
+    throw error;
+  }
+}
+
+/**
+ * Subscribes to incoming connection requests for a user
+ */
+export function subscribeToIncomingRequests(receiverUid, callback) {
+  try {
+    const q = query(
+      collection(db, "connectionRequests"),
+      where("receiverId", "==", receiverUid),
+      where("status", "==", "pending")
+    );
+
+    return onSnapshot(q, (snapshot) => {
+      const requests = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })).sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+
+      Logger.log(`[Firestore] Received ${requests.length} pending requests for ${receiverUid}`);
+      callback(requests);
+    }, (error) => {
+      Logger.error("[Firestore] error in subscribeToIncomingRequests:", error);
+    });
+  } catch (error) {
+    Logger.error("Error subscribing to requests:", error);
+    return () => { };
+  }
+}
+
+/**
+ * Responds to a connection request (Accept/Decline)
+ */
+export async function respondToConnectionRequest(requestId, status, senderId, receiverId) {
+  try {
+    const requestRef = doc(db, "connectionRequests", requestId);
+
+    if (status === 'accepted') {
+      // Create conversation atomically if accepted
+      await createConversation(senderId, receiverId);
+    }
+
+    // Update request status
+    await setDoc(requestRef, { status, respondedAt: serverTimestamp() }, { merge: true });
+    return true;
+  } catch (error) {
+    Logger.error("Error responding to connection request:", error);
+    throw error;
+  }
+}
+
+/**
+     * Subscribes to the full user profile (including ID, PIN, Bio)
+     * @param userId - Target User UID
+     * @param callback - Function(data)
+     */
+export function subscribeToUserProfile(userId, callback) {
+  if (!userId) return () => { };
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    return onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        callback(docSnap.data());
+      } else {
+        callback(null);
+      }
+    }, (error) => {
+      console.error("Error subscribing to profile:", error);
+    });
+  } catch (error) {
+    console.error("Error setting up profile subscription:", error);
+    return () => { };
+  }
+}
+
+/**
+ * Resets the unread count for a specific user in a conversation
+ * @param conversationId - Conversation ID
+ * @param userId - User ID to reset count for
+ */
+export async function resetUnreadCount(conversationId, userId) {
+  if (!conversationId || !userId) return;
+  try {
+    const conversationRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+    const updateField = `unreadCount_${userId}`;
+    await updateDoc(conversationRef, {
+      [updateField]: 0
+    });
+    Logger.log(`[Firestore] ✅ Unread count reset for user ${userId.substring(0, 5)}... in conv ${conversationId.substring(0, 5)}...`);
+  } catch (error) {
+    // Ignore if document doesn't exist or field is missing
+    Logger.warn(`[Firestore] Failed to reset unread count: ${error.message}`);
+  }
+}
+
+export { db, auth, storage };
