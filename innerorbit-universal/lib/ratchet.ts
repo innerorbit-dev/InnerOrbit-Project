@@ -54,7 +54,7 @@ export interface RatchetState {
   // Out-of-order handling
   skippedMessageKeys: Record<string, any>; // Key format: "remoteDhPublicKey:index"
   
-  // PQ Extension (Level 5 Hybrid)
+  // PQ Extension (Future Hybrid)
   ownPqcKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
   remotePqcPublicKey: Uint8Array | null;
   pendingPqcCt: Uint8Array | null;
@@ -154,6 +154,23 @@ function reconstituteBuffer(data: any): Buffer {
 }
 
 /**
+ * Coerces any JSON-deserialized PQC byte array (plain object, Buffer, or Uint8Array)
+ * into a proper Uint8Array that ml_kem768 can consume.
+ * JSON.parse turns Uint8Array/Buffer into {"0":142,"1":251,...} objects — this undoes that.
+ */
+function toUint8Array(data: any): Uint8Array {
+  if (data instanceof Uint8Array) return data;
+  if (Buffer.isBuffer(data)) return new Uint8Array(data);
+  if (typeof data === 'string') return new Uint8Array(Buffer.from(data, 'base64'));
+  if (data && typeof data === 'object') {
+    // JSON-serialized Buffer: { type: 'Buffer', data: [...] } OR plain {"0":142,...}
+    const raw = data.data !== undefined ? data.data : data;
+    return new Uint8Array(Object.values(raw) as number[]);
+  }
+  throw new Error(`[ratchet] Cannot coerce to Uint8Array: ${typeof data}`);
+}
+
+/**
  * Perform a DH Ratchet step
  */
 function dhRatchet(state: RatchetState, header: any) {
@@ -170,8 +187,15 @@ function dhRatchet(state: RatchetState, header: any) {
   
   let pqcSecret: Buffer | undefined;
   if (header.pqcCt && state.ownPqcKeyPair) {
-    const ss = ml_kem768.decapsulate(header.pqcCt, state.ownPqcKeyPair.secretKey);
-    pqcSecret = Buffer.from(ss);
+    try {
+      // ⚠️ JSON round-trip coercion: header.pqcCt arrives as a plain object after JSON.parse
+      const pqcCtBytes = toUint8Array(header.pqcCt);
+      const skBytes = toUint8Array(state.ownPqcKeyPair.secretKey);
+      const ss = ml_kem768.decapsulate(pqcCtBytes, skBytes);
+      pqcSecret = Buffer.from(ss);
+    } catch (pqcErr: any) {
+      Logger.error(`[dhRatchet] PQC decapsulation failed: ${pqcErr?.message}. Falling back to DH-only ratchet.`);
+    }
   }
 
   const dhOut = (diffieHellman({
@@ -192,17 +216,27 @@ function dhRatchet(state: RatchetState, header: any) {
     privateKey: newDh.privateKey as any
   };
   
-  // Update PQ state if new key provided
+  // Update PQ state if new key provided — coerce from JSON object → Uint8Array
   if (header.pqcPk) {
-    state.remotePqcPublicKey = header.pqcPk;
+    try {
+      state.remotePqcPublicKey = toUint8Array(header.pqcPk);
+    } catch (e: any) {
+      Logger.error(`[dhRatchet] Failed to coerce pqcPk: ${e?.message}`);
+    }
   }
 
   let sendPqcCt: Uint8Array | undefined;
   let sendPqcSecret: Buffer | undefined;
   if (state.remotePqcPublicKey) {
-    const { cipherText, sharedSecret } = ml_kem768.encapsulate(state.remotePqcPublicKey);
-    sendPqcCt = cipherText;
-    sendPqcSecret = Buffer.from(sharedSecret);
+    try {
+      // ⚠️ Ensure remotePqcPublicKey is a true Uint8Array (may have been set from JSON state)
+      const pkBytes = toUint8Array(state.remotePqcPublicKey);
+      const { cipherText, sharedSecret } = ml_kem768.encapsulate(pkBytes);
+      sendPqcCt = cipherText;
+      sendPqcSecret = Buffer.from(sharedSecret);
+    } catch (encapErr: any) {
+      Logger.error(`[dhRatchet] PQC encapsulation failed: ${encapErr?.message}. Sending chain will be DH-only.`);
+    }
   }
 
   const dhOutSend = (diffieHellman({
@@ -240,7 +274,7 @@ function skipMessageKeys(state: RatchetState, until: number) {
 /**
  * Encrypt a message with the current ratchet state
  */
-export function ratchetEncrypt(state: RatchetState, plaintext: string): { ciphertext: string; header: any } {
+export async function ratchetEncrypt(state: RatchetState, plaintext: string): Promise<{ ciphertext: string; header: any }> {
   if (!state.sendingChainKey) {
     if (!state.remoteDhPublicKey) {
        throw new Error("Ratchet not initialized for sending (missing remote public key)");
@@ -287,23 +321,45 @@ export function ratchetEncrypt(state: RatchetState, plaintext: string): { cipher
       header
     };
   } catch (e) {
-    // Web Fallback for Level 5 - Use hashed GCM key as raw CBC key
+    // ── Web: SubtleCrypto AES-256-GCM (proper AEAD — new web messages) ──
+    if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+      try {
+        const key = createHash('sha256').update(mk).digest();
+        const cryptoKey = await globalThis.crypto.subtle.importKey(
+          'raw', new Uint8Array(key), { name: 'AES-GCM' }, false, ['encrypt']
+        );
+        const encoded = new TextEncoder().encode(plaintext);
+        const encrypted = await globalThis.crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv: new Uint8Array(iv), tagLength: 128 },
+          cryptoKey, encoded
+        );
+        const result = new Uint8Array(encrypted);
+        const payload = Buffer.from(result.slice(0, -16)).toString('base64');
+        const authTag = Buffer.from(result.slice(-16)).toString('base64');
+        Logger.log(`[ratchetEncrypt] ✅ web: SubtleCrypto AES-256-GCM`);
+        // Format: iv:tag:payload — same as mobile, fully cross-platform
+        return {
+          ciphertext: `${iv.toString('base64')}:${authTag}:${payload}`,
+          header
+        };
+      } catch (subtleErr: any) {
+        Logger.warn(`[ratchetEncrypt] SubtleCrypto failed: ${subtleErr?.message}, using CBC fallback`);
+      }
+    }
+
+    // ── Absolute fallback: CryptoJS AES-CBC + HMAC ──
+    // Only reached if SubtleCrypto is unavailable (very old browsers).
+    // Old messages in web:iv:hmac:payload format still decrypt via ratchetDecrypt's isWeb path.
     const key = createHash('sha256').update(mk).digest();
     const hexKey = CryptoJS.enc.Hex.parse(key.toString("hex"));
-    
-    // 🛡️ SECURITY FIX: Use a random 16-byte IV for CBC instead of static zero IV
     const cbcIv = randomBytes(16);
     const hexIv = CryptoJS.enc.Hex.parse(cbcIv.toString("hex"));
-    
     const encrypted = CryptoJS.AES.encrypt(plaintext, hexKey, {
       iv: hexIv,
       mode: CryptoJS.mode.CBC,
       padding: CryptoJS.pad.Pkcs7
     }).toString();
-
-    // Include a simple HMAC-SHA256 for integrity since CBC doesn't provide it
     const hmac = createHmac('sha256', mk as any).update(encrypted as any).digest('base64');
-
     return {
       ciphertext: `web:${cbcIv.toString("base64")}:${hmac}:${encrypted}`,
       header
@@ -314,7 +370,7 @@ export function ratchetEncrypt(state: RatchetState, plaintext: string): { cipher
 /**
  * Decrypt a message and advance ratchet
  */
-export function ratchetDecrypt(state: RatchetState, ciphertext: string, header: any): string {
+export async function ratchetDecrypt(state: RatchetState, ciphertext: string, header: any): Promise<string> {
   const parts = ciphertext.split(":");
   let iv: Buffer, tag: Buffer, payload: string, isWeb = false, receivedHmac: string | null = null;
 
@@ -353,7 +409,7 @@ export function ratchetDecrypt(state: RatchetState, ciphertext: string, header: 
   if (state.skippedMessageKeys[skipKey]) {
     const mk = state.skippedMessageKeys[skipKey];
     delete state.skippedMessageKeys[skipKey];
-    return decryptWithKey(mk, iv, tag, payload, isWeb);
+    return await decryptWithKey(mk, iv, tag, payload, isWeb);
   }
 
   // If header has a new DH key, we need a DH ratchet step
@@ -369,10 +425,10 @@ export function ratchetDecrypt(state: RatchetState, ciphertext: string, header: 
   state.receivingChainKey = nextCk;
   state.receivingIndex++;
 
-  return decryptWithKey(mk, iv, tag, payload, isWeb, receivedHmac);
+  return await decryptWithKey(mk, iv, tag, payload, isWeb, receivedHmac);
 }
 
-function decryptWithKey(mk: Buffer, iv: Buffer, tag: Buffer, payload: string, isWeb: boolean = false, receivedHmac: string | null = null): string {
+async function decryptWithKey(mk: Buffer, iv: Buffer, tag: Buffer, payload: string, isWeb: boolean = false, receivedHmac: string | null = null): Promise<string> {
   // Pre-derive key variants
   const keyHashed = createHash('sha256').update(mk).digest();
   
@@ -434,7 +490,36 @@ function decryptWithKey(mk: Buffer, iv: Buffer, tag: Buffer, payload: string, is
     return "🔒 [Decryption Error (v5 Web Fallback)]";
   }
 
-  // Strategy 1: NATIVE GCM with Hashed Key (Modern Standard)
+  // ── Web platform receiving a GCM-format message (iv:tag:payload, NOT web: prefix) ──
+  // Use SubtleCrypto to decrypt properly. Old web:iv:hmac:payload messages are handled
+  // by the isWeb=true block above and never reach here.
+  if (!isWeb && typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+    try {
+      const ctBuf = Buffer.from(payload, 'base64');
+      const combined = new Uint8Array(ctBuf.length + tag.length);
+      combined.set(new Uint8Array(ctBuf));
+      combined.set(new Uint8Array(tag), ctBuf.length);
+      const cryptoKey = await globalThis.crypto.subtle.importKey(
+        'raw', new Uint8Array(keyHashed), { name: 'AES-GCM' }, false, ['decrypt']
+      );
+      const decrypted = await globalThis.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(iv), tagLength: 128 },
+        cryptoKey, combined
+      );
+      Logger.log(`[decryptWithKey] ✅ web: SubtleCrypto AES-256-GCM`);
+      return new TextDecoder().decode(decrypted);
+    } catch (subtleErr: any) {
+      Logger.warn(`[decryptWithKey] SubtleCrypto failed: ${subtleErr?.message || 'auth tag mismatch'}`);
+      // On web, SubtleCrypto is the only GCM path. Native fallbacks will throw
+      // GCM_NOT_SUPPORTED_ON_WEB. If SubtleCrypto failed, the key is wrong (ratchet drift).
+      if (isWeb) {
+        return "🔒 [Decryption Error]";
+      }
+      // Non-web platforms (Mobile/Node) should fall through to native paths below
+    }
+  }
+
+  // Strategy 1: NATIVE GCM with Hashed Key (Modern Standard — mobile/Node only)
   try {
     const decipher = createDecipheriv("aes-256-gcm", keyHashed as any, iv as any);
     decipher.setAuthTag(tag as any);
@@ -468,7 +553,7 @@ function decryptWithKey(mk: Buffer, iv: Buffer, tag: Buffer, payload: string, is
       decrypted += decipher.final("utf8");
       return decrypted;
     } catch (err3: any) {
-      Logger.error(`[decryptWithKey] v5: Multi-strategy GCM failed, attempting emergency CBC fallback`);
+      Logger.warn(`[decryptWithKey] v5: Multi-strategy GCM failed, attempting emergency CBC fallback`);
       
       // Final fallback: try CBC variants if GCM fails
       const variants = [
@@ -497,7 +582,7 @@ function decryptWithKey(mk: Buffer, iv: Buffer, tag: Buffer, payload: string, is
         } catch (cbcErr) {}
       }
       
-      Logger.error("[decryptWithKey] ❌ All decryption strategies exhausted", err3);
+      Logger.warn("[decryptWithKey] ❌ All decryption strategies exhausted (Expected for old messages)");
       return "🔒 [Decryption Error]";
     }
   }

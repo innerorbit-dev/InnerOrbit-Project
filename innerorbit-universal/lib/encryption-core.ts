@@ -1,0 +1,124 @@
+import { Buffer } from "buffer";
+import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, ml_kem768 } from "./crypto-wrapper";
+import { decryptLegacy } from "./legacy-decryption";
+import { Logger } from "./logger";
+
+export const GCM_IV_LENGTH = 12;
+export const ENC_VERSION_ELITE = "v3";
+export const ENC_VERSION_GCM = "v2";
+export const ENC_VERSION_SIV = "v3.5";
+export const ENC_VERSION_RATCHET = "v4";
+export const ENC_VERSION_QUANTUM = "v5";
+export const ENC_VERSION_QUANTUM_CHACHA = "v5.5";
+export const ENC_VERSION_PQXDH = "v6";
+export const ENC_VERSION_VAULT_V1 = "vault_v1";
+
+/**
+ * Core Synchronous Encryption (Level 3-6)
+ */
+export function encrypt(text: string, secretKey: string, pqcPublicKey?: Uint8Array, version: string = ENC_VERSION_SIV): string {
+  if (!secretKey) throw new Error("Encryption key is required");
+
+  // Enforce Protocol v3.5 (AES-GCM-SIV) as the mandatory baseline for legacy requests
+  if (version === "v1" || version === "v2" || version === "v3") {
+    Logger.warn(`[encrypt] Unsupported or legacy version ${version} requested. Defaulting to ${ENC_VERSION_SIV}.`);
+    version = ENC_VERSION_SIV;
+  }
+
+  const iv = randomBytes(GCM_IV_LENGTH);
+  const keyHashed = createHash("sha256").update(secretKey).digest();
+
+  // 1. Quantum Hybrid (v5 / v5.5)
+  if (pqcPublicKey && (version === ENC_VERSION_QUANTUM || version === ENC_VERSION_QUANTUM_CHACHA)) {
+    try {
+      const { cipherText: pqcCt, sharedSecret } = ml_kem768.encapsulate(pqcPublicKey);
+      const hybridKey = createHash("sha256").update(Buffer.concat([keyHashed, Buffer.from(sharedSecret)])).digest();
+      const cipherAlg = version === ENC_VERSION_QUANTUM_CHACHA ? "chacha20-poly1305" : "aes-256-gcm";
+      
+      const cipher = createCipheriv(cipherAlg as any, hybridKey as any, iv as any);
+      let encrypted = cipher.update(text, "utf8", "base64");
+      encrypted += cipher.final("base64");
+      const tag = cipher.getAuthTag().toString("base64");
+
+      return `${version}:${iv.toString("base64")}:${tag}:${Buffer.from(pqcCt).toString("base64")}:${encrypted}`;
+    } catch (e) {
+      if (version === ENC_VERSION_QUANTUM_CHACHA) {
+        Logger.warn("[encrypt] Hybrid v5.5 failed, falling back to v5", e);
+        return encrypt(text, secretKey, pqcPublicKey, ENC_VERSION_QUANTUM);
+      }
+      Logger.error(`[encrypt] Hybrid ${version} failed, falling back to ${ENC_VERSION_SIV}`, e);
+      return encrypt(text, secretKey, undefined, ENC_VERSION_SIV);
+    }
+  }
+
+  // 2. Standard Baseline: AES-GCM-SIV (v3.5)
+  try {
+    const ivSiv = createHmac('sha256', keyHashed).update(text).digest().slice(0, GCM_IV_LENGTH);
+    const cipher = createCipheriv("aes-256-gcm", keyHashed as any, ivSiv as any);
+    let encrypted = cipher.update(text, "utf8", "base64");
+    encrypted += cipher.final("base64");
+    const tag = cipher.getAuthTag().toString("base64");
+
+    return `${ENC_VERSION_SIV}:${ivSiv.toString("base64")}:${tag}:${encrypted}`;
+  } catch (error) {
+    Logger.error("[encrypt] Total encryption failure", error);
+    throw new Error("CHAT_SERVICE_UNAVAILABLE");
+  }
+}
+
+/**
+ * Core Synchronous Decryption (Level 3-6)
+ */
+export function decrypt(ciphertext: string, secretKey: string, pqcSecretKey?: Uint8Array): string {
+  if (!secretKey) throw new Error("Decryption key is required");
+  if (!ciphertext) return "";
+
+  try {
+    const parts = ciphertext.split(":");
+    const version = parts[0];
+
+    // 1. Quantum Hybrid Decryption (v5 / v5.5)
+    if ((version === ENC_VERSION_QUANTUM || version === ENC_VERSION_QUANTUM_CHACHA) && parts.length >= 5) {
+      if (!pqcSecretKey) {
+        Logger.warn(`[decrypt] ${version} detected but no PQC secret key provided.`);
+        return decryptLegacy(ciphertext, secretKey);
+      }
+      const iv = Buffer.from(parts[1], "base64");
+      const tag = Buffer.from(parts[2], "base64");
+      const pqcCt = Buffer.from(parts[3], "base64");
+      const payload = parts[4];
+
+      const sharedSecret = ml_kem768.decapsulate(pqcCt, pqcSecretKey);
+      const keyHashed = createHash("sha256").update(secretKey).digest();
+      const hybridKey = createHash("sha256").update(Buffer.concat([keyHashed, Buffer.from(sharedSecret)])).digest();
+
+      const cipherAlg = version === ENC_VERSION_QUANTUM_CHACHA ? "chacha20-poly1305" : "aes-256-gcm";
+      const decipher = createDecipheriv(cipherAlg as any, hybridKey as any, iv as any);
+      decipher.setAuthTag(tag as any);
+      let decrypted = decipher.update(payload, "base64", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted;
+    }
+
+    // 2. Standard AES-GCM-SIV (v3.5)
+    if (version === ENC_VERSION_SIV && parts.length >= 4) {
+      const iv = Buffer.from(parts[1], "base64");
+      const tag = Buffer.from(parts[2], "base64");
+      const payload = parts[3];
+      const keyHashed = createHash("sha256").update(secretKey).digest();
+
+      const decipher = createDecipheriv("aes-256-gcm", keyHashed as any, iv as any);
+      decipher.setAuthTag(tag as any);
+      let decrypted = decipher.update(payload, "base64", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted;
+    }
+
+    // 3. Graceful Legacy Fallback (v1-v3.5)
+    return decryptLegacy(ciphertext, secretKey);
+
+  } catch (error) {
+    Logger.error("[decrypt] Primary decryption failed, trying legacy recovery...", error);
+    return decryptLegacy(ciphertext, secretKey);
+  }
+}

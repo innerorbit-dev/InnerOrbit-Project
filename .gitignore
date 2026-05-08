@@ -86,3 +86,21 @@ __pycache__/
 
 # Temporary
 dist_v2/
+innerorbit-universal/test_output.txt
+scratch/
+
+# Project Documentation
+*.md
+!README.md
+!INNERORBIT_KNOWLEDGE_BASE.md
+!innerorbit-universal/docs/*.md
+innerorbit-universal/docs/*.pdf
+
+# Tools
+tools/flask_manager/
+
+.terminal_choice
+.browser_choice 
+graphify-out/
+graphify.json
+

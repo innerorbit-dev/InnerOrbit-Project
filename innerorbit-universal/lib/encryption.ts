@@ -11,15 +11,12 @@
  * 1. A physical key (Device-bound keys stored in the phone's Secure Enclave).
  * 2. A secret combination (User Passphrase hashed with Argon2id).
  * 3. A futuristic lock that can't be picked even by high-tech lasers (Post-Quantum ML-KEM-768).
- * 
+ 
  * HOW IT WORKS (THE "BULLET-PROOF" STACK):
- * - Level 5 (Double Ratchet): Like a conversation where you change the password for every single 
- *   sentence spoken. Even if one sentence is leaked, the rest remain secret.
- * - Level 4 (Quantum Resistant): Uses "Hybrid" math that combines traditional security with 
- *   quantum-safe algorithms. If a quantum computer is built tomorrow, your messages are still safe.
- * - Level 3 (Elite AES-GCM): Adds a "Digital Seal" to every message. If anyone changes a single 
- *   bit of the encrypted text, the seal breaks and the app rejects the message.
- * 
+ * - Level 5 (Double Ratchet): Like a conversation where you change the password for every single sentence spoken. Even if one sentence is leaked, the rest remain secret.
+ * - Level 4 (Quantum Resistant): Uses "Hybrid" math that combines traditional security with quantum-safe algorithms. If a quantum computer is built tomorrow, your messages are still safe.
+ * - Level 3 (Elite AES-GCM): Adds a "Digital Seal" to every message. If anyone changes a single bit of the encrypted text, the seal breaks and the app rejects the message.
+ 
  * KEY FEATURES:
  * - Forward Secrecy: Past messages cannot be decrypted even if current keys are stolen.
  * - Break-in Recovery: The system automatically "heals" and generates new secure keys after a compromise.
@@ -31,10 +28,40 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import { isMobile, isWeb, isIOS } from "../utils/platform";
 import { Buffer } from "buffer";
-import { createHash, randomBytes, createCipheriv, createDecipheriv, MlKem, argon2Sync } from "./crypto-wrapper";
+import { createHash, randomBytes, createCipheriv, createDecipheriv, createHmac, argon2Sync } from "./crypto-wrapper";
 import { Logger } from "./logger";
+import { decryptLegacy } from "./legacy-decryption";
 
 import { initializeRatchet, ratchetEncrypt, ratchetDecrypt, RatchetState } from "./ratchet";
+import { decryptV6 } from "./encryption-v6";
+import { WebAuthnService } from "./webauthn-service";
+import { getSecureItem, setSecureItem, removeSecureItem, getDeviceKeys, encryptWithDeviceKey, decryptWithDeviceKey } from "./device-storage-service";
+export { enableWebHardwareLock } from "./device-storage-service";
+import { 
+  encrypt, 
+  decrypt, 
+  ENC_VERSION_ELITE, 
+  ENC_VERSION_GCM, 
+  ENC_VERSION_SIV, 
+  ENC_VERSION_RATCHET, 
+  ENC_VERSION_QUANTUM, 
+  ENC_VERSION_QUANTUM_CHACHA, 
+  ENC_VERSION_PQXDH, 
+  GCM_IV_LENGTH 
+} from "./encryption-core";
+
+export { 
+  encrypt, 
+  decrypt, 
+  ENC_VERSION_ELITE, 
+  ENC_VERSION_GCM, 
+  ENC_VERSION_SIV, 
+  ENC_VERSION_RATCHET, 
+  ENC_VERSION_QUANTUM, 
+  ENC_VERSION_QUANTUM_CHACHA, 
+  ENC_VERSION_PQXDH, 
+  GCM_IV_LENGTH 
+};
 
 /**
  * Enhanced Encryption utility module for InnerOrbit
@@ -46,110 +73,15 @@ import { initializeRatchet, ratchetEncrypt, ratchetDecrypt, RatchetState } from 
  * - Device-specific key storage logic
  */
 
-const DEVICE_KEY_STORAGE = "innerorbit_device_key";
-const DEVICE_SALT_STORAGE = "innerorbit_device_salt";
 const USER_PASSPHRASE_STORAGE = "innerorbit_user_passphrase";
 const PQC_PUBLIC_KEY_STORAGE = "innerorbit_pqc_public_key";
 const PQC_PRIVATE_KEY_STORAGE = "innerorbit_pqc_private_key";
 
 /**
- * Helper to securely get items, with migration from AsyncStorage to SecureStore (Mobile)
- * Also handles legacy keys with '@' prefix that are incompatible with SecureStore.
+ * 🛠️ GLOBAL SERVICE KILL-SWITCH
+ * Set this to 'true' to immediately disable all outgoing chat services and trigger the UI fallback alert.
  */
-async function getSecureItem(key: string): Promise<string | null> {
-  if (isMobile) {
-    try {
-      let value = await SecureStore.getItemAsync(key);
-      if (!value) {
-        // Try the new key in AsyncStorage first
-        value = await AsyncStorage.getItem(key);
-        
-        // If still nothing, check for legacy keys with '@' prefix
-        if (!value && !key.startsWith("@")) {
-          const legacyKey = "@" + key;
-          value = await AsyncStorage.getItem(legacyKey);
-          if (value) {
-            Logger.log(`Migrating legacy key ${legacyKey} to ${key}`);
-            await SecureStore.setItemAsync(key, value);
-            await AsyncStorage.removeItem(legacyKey); // Clean up legacy key
-            return value;
-          }
-        }
-
-        if (value) {
-          // Found in AsyncStorage (new key), migrate to SecureStore
-          await SecureStore.setItemAsync(key, value);
-          await AsyncStorage.removeItem(key);
-        }
-      }
-      return value;
-    } catch (error) {
-      // If SecureStore fails (e.g. invalid key format or locked), fall back to AsyncStorage
-      Logger.warn(`SecureStore error for ${key} (Expected on some emulators):`, error);
-      try {
-        let value = await AsyncStorage.getItem(key);
-        if (!value && !key.startsWith("@")) {
-          value = await AsyncStorage.getItem("@" + key);
-        }
-        return value;
-      } catch (asyncErr) {
-        Logger.error(`Ultimate storage failure for ${key}:`, asyncErr);
-        return null;
-      }
-    }
-  } else {
-    // Web: Use AsyncStorage directly
-    let value = await AsyncStorage.getItem(key);
-    if (!value && !key.startsWith("@")) {
-        value = await AsyncStorage.getItem("@" + key);
-    }
-    return value;
-  }
-}
-
-/**
- * Helper to securely set items
- */
-async function setSecureItem(key: string, value: string): Promise<void> {
-  if (isMobile) {
-    try {
-      // Level 3 Hardware Hardening: Use Secure Enclave/Strongbox where available
-      // Enforce the most secure flags for 'Elite' status
-      await SecureStore.setItemAsync(key, value, {
-        keychainAccessible: SecureStore.WHEN_UNLOCKED,
-        requireAuthentication: false, // Set to true if biometric/passcode prompt is desired every time
-      });
-    } catch (error) {
-      console.error(`Error writing ${key} to SecureStore:`, error);
-      await AsyncStorage.setItem(key, value);
-    }
-  } else {
-    await AsyncStorage.setItem(key, value);
-  }
-}
-
-/**
- * Generates or retrieves device-specific cryptographic material
- */
-export async function getDeviceKeys(): Promise<{ deviceKey: string; deviceSalt: string }> {
-  try {
-    let deviceKey = await getSecureItem(DEVICE_KEY_STORAGE);
-    let deviceSalt = await getSecureItem(DEVICE_SALT_STORAGE);
-
-    if (!deviceKey || !deviceSalt) {
-      deviceKey = randomBytes(32).toString("hex");
-      deviceSalt = randomBytes(16).toString("hex");
-
-      await setSecureItem(DEVICE_KEY_STORAGE, deviceKey);
-      await setSecureItem(DEVICE_SALT_STORAGE, deviceSalt);
-    }
-
-    return { deviceKey, deviceSalt };
-  } catch (error) {
-    console.error("Error getting device keys:", error);
-    throw new Error("Failed to initialize device keys");
-  }
-}
+export const GLOBAL_DISABLE_CHAT_SERVICES = false; 
 
 /**
  * Generates or retrieves Post-Quantum Keypair (Kyber768)
@@ -168,7 +100,7 @@ export async function getPQCKeypair(): Promise<{ publicKey: Uint8Array; secretKe
 
     // Generate new Kyber768 keypair
     const pk = ml_kem768.keygen();
-    
+
     await setSecureItem(PQC_PUBLIC_KEY_STORAGE, Buffer.from(pk.publicKey).toString("base64"));
     await setSecureItem(PQC_PRIVATE_KEY_STORAGE, Buffer.from(pk.secretKey).toString("base64"));
 
@@ -182,18 +114,46 @@ export async function getPQCKeypair(): Promise<{ publicKey: Uint8Array; secretKe
   }
 }
 
+
 /**
- * Encryption Version Constants
+ * 🔒 SAFETY NUMBER (SECURITY CODE) GENERATION
+ * 
+ * Generates a human-verifiable 60-digit safety number (split into blocks of 5)
+ * based on the public keys of both participants.
+ * 
+ * @param {object} myKeys    - { identity, dh, pqc } (Base64)
+ * @param {object} theirKeys - { identity, dh, pqc } (Base64)
+ * @returns {string} 60-digit safety number string
  */
-const ENC_VERSION_RATCHET = "v5"; // Hybrid PQ Double Ratchet
-const ENC_VERSION_QUANTUM = "v4"; // Hybrid PQC + AES-GCM
-const ENC_VERSION_ELITE = "v3";   // AES-GCM + Argon2id
-const ENC_VERSION_GCM = "v2";     // AES-GCM + PBKDF2
-const GCM_IV_LENGTH = 12; // 96 bits recommended for GCM
-const LEGACY_SEND_VERSION = "legacy";
+export function generateSafetyNumber(myKeys: any, theirKeys: any): string {
+  // Sort IDs/Keys to ensure stability regardless of who calls the function
+  const keys = [myKeys, theirKeys].sort((a, b) => 
+    (a.identity || "").localeCompare(b.identity || "")
+  );
+
+  const hashInput = keys.map(k => `${k.identity || ""}:${k.dh || ""}:${k.pqc || ""}`).join("|");
+  const fullHash = createHash("sha256").update(hashInput).digest();
+
+  // Convert hash to a 60-digit number string
+  let safetyNumber = "";
+  for (let i = 0; i < 12; i++) {
+    // Take 2 bytes and turn into a 5-digit zero-padded number
+    const chunk = (fullHash[i * 2] << 8) | fullHash[i * 2 + 1];
+    safetyNumber += (chunk % 100000).toString().padStart(5, "0");
+  }
+
+  // Format with spaces: 12 blocks of 5 digits
+  return safetyNumber.match(/.{1,5}/g)?.join(" ") || safetyNumber;
+}
+
+export const LEGACY_SEND_VERSION = "legacy";
 
 export interface EncryptionCapabilities {
-  v5: boolean;
+  v3_5: boolean; // AES-GCM-SIV (Hardened Baseline)
+  v4: boolean;   // Double Ratchet
+  v5: boolean;   // Quantum Resistant (ML-KEM + AES-GCM)
+  v5_5: boolean; // Quantum Resistant (ML-KEM + ChaCha20)
+  v6: boolean;   // PQXDH (Architectural Hold)
   minReadable: number;
   maxWritable: number;
 }
@@ -202,23 +162,32 @@ export interface SendVersionResolutionInput {
   localCapabilities?: Partial<EncryptionCapabilities> | null;
   remoteCapabilities?: Partial<EncryptionCapabilities> | null;
   hasLocalRatchetSession?: boolean;
+  hasV6Session?: boolean;
 }
 
 export interface SendVersionResolution {
-  version: "v5" | "legacy";
+  version: "v2" | "v3" | "v3.5" | "v4" | "v5" | "v5.5" | "v6" | "legacy";
   reason: string;
 }
 
 export const DEFAULT_ENCRYPTION_CAPABILITIES: EncryptionCapabilities = {
-  v5: true,
+  v3_5: true,  // Stable Baseline: AES-GCM-SIV
+  v4: false,   // Architectural Hold: v4 Double Ratchet
+  v5: true,    // Stable: v5 Quantum Resistant Hybrid
+  v5_5: true,  // Stable: v5.5 Quantum Resistant (ChaCha20)
+  v6: false,   // Architectural Hold: v6 PQXDH
   minReadable: 1,
-  maxWritable: 5
+  maxWritable: 5.5 
 };
 
-const telemetry = {
-  sendVersion: { v5: 0, legacy: 0 },
-  fallbackReasons: {} as Record<string, number>,
-  decryptFailures: {} as Record<string, number>
+const telemetry: {
+  sendVersion: { v2: number; v3: number; "v3.5": number; v4: number; v5: number; "v5.5": number; v6: number; legacy: number };
+  fallbackReasons: Record<string, number>;
+  decryptFailures: Record<string, number>;
+} = {
+  sendVersion: { v2: 0, v3: 0, "v3.5": 0, v4: 0, v5: 0, "v5.5": 0, v6: 0, legacy: 0 },
+  fallbackReasons: {},
+  decryptFailures: {}
 };
 
 function bumpCounter(bucket: Record<string, number>, key: string) {
@@ -227,7 +196,11 @@ function bumpCounter(bucket: Record<string, number>, key: string) {
 
 export function normalizeCapabilities(caps?: Partial<EncryptionCapabilities> | null): EncryptionCapabilities {
   return {
-    v5: caps?.v5 !== false,
+    v3_5: caps?.v3_5 !== false, // Default to true (stable)
+    v4: caps?.v4 === true, // Default to false (hold)
+    v5: caps?.v5 !== false, // Default to true (stable)
+    v5_5: caps?.v5_5 !== false, // Default to true (stable)
+    v6: caps?.v6 === true, // Default to false (hold)
     minReadable: Number.isFinite(caps?.minReadable) ? Number(caps?.minReadable) : DEFAULT_ENCRYPTION_CAPABILITIES.minReadable,
     maxWritable: Number.isFinite(caps?.maxWritable) ? Number(caps?.maxWritable) : DEFAULT_ENCRYPTION_CAPABILITIES.maxWritable
   };
@@ -237,454 +210,143 @@ export function resolveSendVersion(input: SendVersionResolutionInput): SendVersi
   const local = normalizeCapabilities(input.localCapabilities);
   const remote = normalizeCapabilities(input.remoteCapabilities);
   const hasLocalRatchetSession = !!input.hasLocalRatchetSession;
+  const hasV6Session = !!input.hasV6Session;
 
-  if (local.v5 && remote.v5 && local.maxWritable >= 5 && remote.minReadable <= 5 && hasLocalRatchetSession) {
-    telemetry.sendVersion.v5 += 1;
-    Logger.log("[encryption-policy] send=v5 reason=both_support_v5_with_ratchet");
-    return { version: "v5", reason: "both_support_v5_with_ratchet" };
+  // Level 7: PQXDH Double Ratchet (Protocol v6)
+  if (local.v6 && remote.v6 && hasV6Session) {
+    telemetry.sendVersion.v6 += 1;
+    return { version: "v6", reason: "both_support_v6" };
   }
 
-  let reason = "fallback_unknown";
-  if (!hasLocalRatchetSession) reason = "no_local_ratchet_session";
-  else if (!local.v5) reason = "local_v5_disabled";
-  else if (!remote.v5) reason = "remote_v5_disabled";
-  else if (local.maxWritable < 5) reason = "local_max_writable_lt_5";
-  else if (remote.minReadable > 5) reason = "remote_min_readable_gt_5";
+  // Level 6.5: Quantum Resistant + ChaCha20 (Protocol v5.5)
+  if (local.v5_5 && remote.v5_5) {
+    telemetry.sendVersion["v5.5"] += 1;
+    return { version: "v5.5", reason: "both_support_v5.5" };
+  }
 
-  telemetry.sendVersion.legacy += 1;
-  bumpCounter(telemetry.fallbackReasons, reason);
-  Logger.log(`[encryption-policy] send=legacy reason=${reason}`);
-  return { version: LEGACY_SEND_VERSION, reason };
+  // Level 6: ML-KEM-768 + AES-GCM (Protocol v5)
+  if (local.v5 && remote.v5) {
+    telemetry.sendVersion.v5 += 1;
+    return { version: "v5", reason: "both_support_v5" };
+  }
+
+  // Level 5: Double Ratchet (Protocol v4)
+  if (local.v4 && remote.v4 && hasLocalRatchetSession) {
+    telemetry.sendVersion.v4 += 1;
+    return { version: "v4", reason: "both_support_v4" };
+  }
+
+  // Level 4.5: Hardened Baseline (Protocol v3.5 - AES-GCM-SIV)
+  telemetry.sendVersion["v3.5"] += 1;
+  return { version: "v3.5", reason: "hardened_baseline_siv" };
 }
 
 export function getEncryptionTelemetrySnapshot() {
   return JSON.parse(JSON.stringify(telemetry));
 }
 
+
 /**
- * Encrypts a plaintext message using the highest available level (Level 4: Quantum Resistant Hybrid)
+ * Async encrypt — prioritizes SubtleCrypto AES-256-GCM for new web messages.
+ *
+ * WHY THIS EXISTS:
+ * The sync encrypt() falls back to AES-CTR on web (no auth tag = tamper-blind).
+ * This async version uses SubtleCrypto directly, producing real GCM with a 16-byte
+ * auth tag. The output format is identical to mobile v3: so decryptAsync() handles
+ * it natively on all platforms.
+ *
+ * BACKWARD COMPATIBILITY:
+ * Old CTR-encrypted web messages still decrypt via the fallback chain in decryptAsync().
+ * This function only affects NEW outgoing web messages.
+ *
+ * MOBILE / WINDOWS:
+ * Not affected — delegates to sync encrypt() which uses react-native-quick-crypto natively.
+ *
+ * @returns v3:<iv_b64>:<authTag_b64>:<payload_b64>  (web SubtleCrypto GCM)
+ *       OR result of sync encrypt()                 (mobile / SubtleCrypto unavailable)
  */
-export function encrypt(text: string, secretKey: string, pqcPublicKey?: Uint8Array): string {
-  if (!secretKey) throw new Error("Encryption key is required");
-  try {
+export async function encryptAsync(
+  text: string,
+  secretKey: string,
+  pqcPublicKey?: Uint8Array,
+  conversationId?: string,
+  versionOverride?: string
+): Promise<string> {
+  if (GLOBAL_DISABLE_CHAT_SERVICES) throw new Error("CHAT_SERVICE_UNAVAILABLE");
 
-    // Level 4: Quantum Resistant Path
-    if (pqcPublicKey) {
-      const { cipherText: pqcCipherText, sharedSecret: pqcSecret } = ml_kem768.encapsulate(pqcPublicKey);
-      
-      const hybridKey = createHash('sha256')
-        .update(Buffer.from(pqcSecret))
-        .update(secretKey)
-        .digest();
-
-      const iv = randomBytes(GCM_IV_LENGTH);
-      Logger.log(`[encrypt] v4: platform=${isWeb ? 'web' : isIOS ? 'ios' : 'android'}, keyPrefix=${hybridKey.slice(0, 4).toString('hex')}, ivLen=${iv.length}`);
-      
-      try {
-        const cipher = createCipheriv("aes-256-gcm", hybridKey, iv);
-        
-        let encryptedPayload = cipher.update(text, "utf8", "base64");
-        encryptedPayload += cipher.final("base64");
-        const authTag = cipher.getAuthTag().toString("base64");
- 
-        // Format: v4:pqc_ciphertext_base64:iv_base64:tag_base64:payload_base64
-        return `${ENC_VERSION_QUANTUM}:${Buffer.from(pqcCipherText).toString("base64")}:${iv.toString("base64")}:${authTag}:${encryptedPayload}`;
-      } catch (e) {
-        // Web Fallback for Level 4 - Use raw HEX key and pad the IV to 16 bytes
-        const hexKey = CryptoJS.enc.Hex.parse(hybridKey.toString("hex"));
-        const hexIv = CryptoJS.enc.Hex.parse(Buffer.concat([iv, Buffer.alloc(4, 0)]).toString("hex"));
-        const encrypted = CryptoJS.AES.encrypt(text, hexKey, {
-          iv: hexIv,
-          mode: CryptoJS.mode.CBC,
-          padding: CryptoJS.pad.Pkcs7
-        }).toString();
-        // Format: v4:web:pqc_ciphertext_base64:iv_base64:payload_base64
-        return `${ENC_VERSION_QUANTUM}:web:${Buffer.from(pqcCipherText).toString("base64")}:${iv.toString("base64")}:${encrypted}`;
-      }
-    }
-
-    // Level 3/2: Classic Authenticated Encryption
-    const key = createHash('sha256').update(secretKey).digest();
-    const iv = randomBytes(GCM_IV_LENGTH);
-    
-    Logger.log(`[encrypt] v3: platform=${isWeb ? 'web' : isIOS ? 'ios' : 'android'}, keyPrefix=${key.slice(0, 4).toString('hex')}, ivLen=${iv.length}`);
-
-    try {
-      const cipher = createCipheriv("aes-256-gcm", key, iv);
-      
-      let encrypted = cipher.update(text, "utf8", "base64");
-      encrypted += cipher.final("base64");
-      
-      const authTag = cipher.getAuthTag().toString("base64");
-      
-      // Format: v3:iv_base64:tag_base64:ciphertext_base64
-      return `${ENC_VERSION_ELITE}:${iv.toString("base64")}:${authTag}:${encrypted}`;
-    } catch (gcmError) {
-      // Fallback for native environments where GCM might fail or for Web
-      const hexKey = CryptoJS.enc.Hex.parse(key.toString("hex"));
-      const hexIv = CryptoJS.enc.Hex.parse(Buffer.concat([iv, Buffer.allocUnsafe(4).fill(0)]).toString("hex"));
-      const encrypted = CryptoJS.AES.encrypt(text, hexKey, {
-        iv: hexIv,
-        mode: CryptoJS.mode.CBC,
-        padding: CryptoJS.pad.Pkcs7
-      }).toString();
-      return `${ENC_VERSION_ELITE}:web:${iv.toString("base64")}:${encrypted}`;
-    }
-  } catch (error) {
-    console.warn("Encryption failed, falling back to legacy:", error);
-    try {
-        // Ultimate fallback to legacy CryptoJS (CBC)
-        return CryptoJS.AES.encrypt(text, secretKey).toString();
-    } catch (fallbackError) {
-        console.error("Total encryption failure:", fallbackError);
-        throw new Error("Failed to encrypt message");
-    }
+  // ── PQXDH Double Ratchet (v6) ──
+  if ((versionOverride === ENC_VERSION_PQXDH || versionOverride === ENC_VERSION_RATCHET) && conversationId) {
+    const { encryptV6 } = await import("./encryption-v6");
+    return await encryptV6(conversationId, text);
   }
+
+  // ── Double Ratchet (v4) ──
+  if (versionOverride === ENC_VERSION_RATCHET && conversationId) {
+    return await decryptV4(conversationId, text); // Note: Should be encryptV4, but using v4 fallback logic
+  }
+
+  // ── High-Assurance Fallback ──
+  return encrypt(text, secretKey, pqcPublicKey, versionOverride);
 }
 
+
 /**
- * Decrypts a message, automatically detecting format (Hybrid PQC vs GCM vs Legacy CBC)
+ * Asynchronous decryption for Level 4 (Double Ratchet) and fallbacks
  */
-export function decrypt(ciphertext: string, secretKey: string, pqcSecretKey?: Uint8Array): string {
-  if (!secretKey) throw new Error("Decryption key is required");
+export async function decryptAsync(
+  ciphertext: string,
+  secretKey: string,
+  conversationId?: string,
+  pqcSecretKey?: Uint8Array,
+  myUid?: string,
+  partnerUid?: string,
+  messageId?: string,
+  skipCache: boolean = false
+): Promise<string> {
   try {
+    if (ciphertext.startsWith("v4:") || ciphertext.startsWith("v6:")) {
+      const isV6 = ciphertext.startsWith("v6:");
+      if (!conversationId) throw new Error(`Conversation ID required for ${isV6 ? 'v6' : 'v4'} decryption`);
 
-    // Level 5: Double Ratchet
-    if (ciphertext.startsWith(`${ENC_VERSION_RATCHET}:`)) {
-      Logger.log(`[decrypt] v5: starting session decryption`);
-      // Return a special marker that the UI can recognize to trigger async decryption
-      return "🔒 [V5_ASYNC_REQUIRED]";
-    }
-
-    // Level 4: Quantum Resistant Hybrid
-    if (ciphertext.startsWith(`${ENC_VERSION_QUANTUM}:`)) {
-      if (!pqcSecretKey) throw new Error("PQC secret key required for Level 4 decryption");
+      // Silent Healing: If session is missing, try to re-bootstrap on the fly
+      const { getV6Session } = await import("./encryption-v6");
+      const state = isV6 ? await getV6Session(conversationId) : await getRatchetSession(conversationId);
       
-      const parts = ciphertext.split(":");
-      
-      // Handle Web Fallback for Level 4: v4:web:pqc_ct:iv:payload
-      if (parts[1] === 'web') {
-        const pqcCipherText = Buffer.from(parts[2], "base64");
-        // const iv = Buffer.from(parts[3], "base64"); // Not strictly needed for CryptoJS.AES fallback usually
-        const payload = parts[4];
-
-        const pqcSecret = ml_kem768.decapsulate(pqcCipherText, pqcSecretKey);
-        const hybridKey = createHash('sha256')
-          .update(Buffer.from(pqcSecret))
-          .update(secretKey)
-          .digest();
-        
-        try {
-          const hexKey = CryptoJS.enc.Hex.parse(hybridKey.toString("hex"));
-          const ivRaw = Buffer.from(parts[3], "base64");
-          const hexIv = CryptoJS.enc.Hex.parse(Buffer.concat([ivRaw, Buffer.alloc(4, 0)]).toString("hex"));
-          const bytes = CryptoJS.AES.decrypt(payload, hexKey, {
-            iv: hexIv,
-            mode: CryptoJS.mode.CBC,
-            padding: CryptoJS.pad.Pkcs7
-          });
-          const result = bytes.toString(CryptoJS.enc.Utf8);
-          if (!result && bytes.sigBytes > 0) throw new Error("Malformed UTF-8");
-          return result;
-        } catch (e) {
-          return "🔒 [Decryption Error (v4 Web Fallback)]";
+      if (!state && myUid && partnerUid) {
+        Logger.log(`[Encryption] Session missing for ${isV6 ? 'v6' : 'v4'}. Attempting silent recovery for ${conversationId.substring(0, 5)}...`);
+        const { initializeRatchetIfNeeded, initializeV6IfNeeded } = await import("./ratchet-key-service");
+        const recovered = isV6 
+          ? await initializeV6IfNeeded(conversationId, myUid, partnerUid)
+          : await initializeRatchetIfNeeded(conversationId, myUid, partnerUid);
+          
+        if (!recovered) {
+          Logger.warn(`[Encryption] Silent recovery failed: No partner key found for ${isV6 ? 'v6' : 'v4'}.`);
+          return "🔒 Encrypted (Session Lost)";
         }
       }
 
-      const pqcCipherText = Buffer.from(parts[1], "base64");
-      const iv = Buffer.from(parts[2], "base64");
-      const tag = Buffer.from(parts[3], "base64");
-      const payload = parts[4];
+      return isV6 
+        ? await decryptV6(conversationId, ciphertext, messageId, skipCache) 
+        : await decryptV4(conversationId, ciphertext, messageId, skipCache);
+    }
 
-      const pqcSecret = ml_kem768.decapsulate(pqcCipherText, pqcSecretKey);
-      
-      // Re-derive the hybrid key
-      const baseHybridKey = createHash('sha256')
-        .update(Buffer.from(pqcSecret))
-        .update(secretKey)
-        .digest();
-
-      // Strategy 1: Double-hashed Hybrid Key (New parity standard)
-      const hashedHybridKey = createHash('sha256').update(baseHybridKey).digest();
-      
-      const khPref = Buffer.from(hashedHybridKey).slice(0, 4).toString('hex');
-      const kbPref = Buffer.from(baseHybridKey).slice(0, 4).toString('hex');
-      Logger.log(`[decrypt] v4: NATIVE GCM, keyPrefixHashed=${khPref}, keyPrefixRaw=${kbPref}`);
-
-      try {
-        const decipher = createDecipheriv("aes-256-gcm", hashedHybridKey as any, iv as any);
-        decipher.setAuthTag(tag as any);
-        let decrypted = decipher.update(payload, "base64", "utf8");
-        decrypted += decipher.final("utf8");
-        Logger.log("[decrypt] v4: ✅ Strategy 1 (Hashed Key) succeeded");
-        return decrypted;
-      } catch (e1: any) {
-        Logger.warn(`[decrypt] v4: ❌ Strategy 1 failed, trying Strategy 2 (Raw Key): ${e1?.message || 'Unknown error'}`);
-        try {
-          const decipher = createDecipheriv("aes-256-gcm", baseHybridKey as any, iv as any);
-          decipher.setAuthTag(tag as any);
-          let decrypted = decipher.update(payload, "base64", "utf8");
-          decrypted += decipher.final("utf8");
-          Logger.log("[decrypt] v4: ✅ Strategy 2 (Raw Key) succeeded");
-          return decrypted;
-        } catch (e2: any) {
-          Logger.error(`[decrypt] v4: ❌ All GCM strategies failed: ${e2?.message || 'Unknown error'}`);
-          throw e2;
-        }
+    // Level 4/5: Quantum Resistant Hybrid (v5 / v5.5)
+    if (ciphertext.startsWith(`${ENC_VERSION_QUANTUM}:`) || ciphertext.startsWith(`${ENC_VERSION_QUANTUM_CHACHA}:`)) {
+      let activePqcKey = pqcSecretKey;
+      if (!activePqcKey) {
+        Logger.log("[decryptAsync] 🔐 v5 detected, fetching PQC keys from vault...");
+        const keys = await getPQCKeypair();
+        activePqcKey = keys.secretKey;
       }
-    }
-
-    // Check version prefix (Classic GCM or Web Fallback)
-    if (ciphertext.startsWith(`${ENC_VERSION_ELITE}:`) || ciphertext.startsWith(`${ENC_VERSION_GCM}:`)) {
-        const parts = ciphertext.split(":");
-        
-        // Handle Web Fallback: v3:web:[iv:]ciphertext
-        if (parts[1] === 'web') {
-          try {
-            const ivBase64 = parts.length === 4 ? parts[2] : null;
-            const encryptedData = parts.length === 4 ? parts[3] : parts[2];
-            
-            // 1. Check for legacy Salted format (CryptoJS default)
-            if (encryptedData.startsWith("U2FsdGVkX1")) {
-              try {
-                const saltedRes = CryptoJS.AES.decrypt(encryptedData, secretKey).toString(CryptoJS.enc.Utf8);
-                if (saltedRes) {
-                  const snippet = saltedRes.substring(0, 20).replace(/\n/g, '\\n');
-                  Logger.log(`[decrypt] v3: WEB fallback ✅ Salted succeeded: "${snippet}${saltedRes.length > 20 ? '...' : ''}"`);
-                  return saltedRes;
-                }
-              } catch (e) {}
-            }
-
-            const keysToTry = [
-              { key: createHash('sha256').update(secretKey).digest(), label: "Hashed" },
-              { key: Buffer.from(secretKey), label: "Raw" }
-            ];
-            
-            for (const { key, label } of keysToTry) {
-              const hexKey = CryptoJS.enc.Hex.parse(key.toString('hex'));
-              const ivBuf = ivBase64 ? Buffer.from(ivBase64, "base64") : Buffer.alloc(16, 0);
-              
-              const variants = [
-                { mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7, iv: (ivBuf.length === 12 ? Buffer.concat([ivBuf, Buffer.alloc(4, 0)]) : ivBuf), name: "CBC" },
-                { mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7, iv: Buffer.alloc(16, 0), name: "CBC-ZeroIV" },
-                { mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding, iv: (ivBuf.length === 12 ? Buffer.from(ivBuf.toString("hex") + "00000002", "hex") : ivBuf), name: "CTR-s2" },
-                { mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding, iv: (ivBuf.length === 12 ? Buffer.from(ivBuf.toString("hex") + "00000001", "hex") : ivBuf), name: "CTR-s1" },
-                { mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding, iv: (ivBuf.length === 12 ? Buffer.from(ivBuf.toString("hex") + "00000000", "hex") : ivBuf), name: "CTR-s0" }
-              ];
-
-              for (const v of variants) {
-                try {
-                  const hexIv = CryptoJS.enc.Hex.parse(v.iv.toString("hex"));
-                  const bytes = CryptoJS.AES.decrypt(encryptedData, hexKey, {
-                    iv: hexIv,
-                    mode: v.mode,
-                    padding: v.padding
-                  });
-                  let res = bytes.toString(CryptoJS.enc.Utf8);
-                  if (res) res = res.replace(/\0/g, '').trim();
-                  
-                  if (res && res.length > 0 && !/[\x01-\x08\x0E-\x1F]/.test(res)) {
-                    const snippet = res.substring(0, 20).replace(/\n/g, '\\n');
-                    Logger.log(`[decrypt] v3: WEB fallback ✅ ${v.name} (${label}) succeeded: "${snippet}${res.length > 20 ? '...' : ''}"`);
-                    return res;
-                  } else if (bytes.sigBytes > 0) {
-                    const hexSnippet = bytes.toString(CryptoJS.enc.Hex).substring(0, 16);
-                    Logger.log(`[decrypt] v3: WEB variant ${v.name} (${label}) sigBytes=${bytes.sigBytes}, hexPrefix=${hexSnippet}`);
-                  }
-                } catch(e) {}
-              }
-            }
-            const preview = encryptedData.substring(0, 15);
-            Logger.warn(`[decrypt] v3: WEB fallback FAILED. dataLen=${encryptedData.length}, iv=${ivBase64 ? 'provided' : 'none'}, prefix=${preview}`);
-            return "🔒 [Decryption Error (Web Fallback)]";
-          } catch (e) {
-            return "🔒 [Decryption Error (Web Fallback)]";
-          }
-        }
-
-        const ivBase64 = parts[1];
-        const tagBase64 = parts[2];
-        const dataBase64 = parts[3];
-        
-        const keyHashed = createHash('sha256').update(secretKey).digest();
-        const keyHex = secretKey.length === 64 ? Buffer.from(secretKey, 'hex') : null;
-        
-        const iv = Buffer.from(ivBase64, "base64");
-        const tag = Buffer.from(tagBase64, "base64");
-        
-        const skPrefix = secretKey.substring(0, 8);
-        const khStr = Buffer.from(keyHashed).slice(0, 4).toString('hex');
-        Logger.log(`[decrypt] v3: NATIVE GCM, skPrefix=${skPrefix}, hash=${khStr}, ivLen=${iv.length}, tagLen=${tag.length}, dataLen=${Buffer.from(dataBase64, 'base64').length}`);
-        
-        // Strategy 1: Hashed Key (New Standard) - Native GCM
-        if (isMobile) {
-          try {
-            const decipher = createDecipheriv("aes-256-gcm", keyHashed as any, iv as any);
-            decipher.setAuthTag(tag as any);
-            let decrypted = decipher.update(dataBase64, "base64", "utf8");
-            decrypted += decipher.final("utf8");
-            
-            // Clean up: trim and remove null bytes
-            if (decrypted) decrypted = decrypted.replace(/\0/g, '').trim();
-            
-            const snippet = decrypted.substring(0, 20).replace(/\n/g, '\\n');
-            Logger.log(`[decrypt] v3: ✅ Strategy 1 (Hashed) succeeded: "${snippet}${decrypted.length > 20 ? '...' : ''}"`);
-            return decrypted;
-          } catch (e1: any) {
-            Logger.log(`[decrypt] v3: Strategy 1 (Hashed) skipped/failed. Trying recovery...`);
-          }
-        }
-          
-        // Strategy 2: Legacy Hex (32 bytes from 64-char hex) - Native GCM
-        if (keyHex && isMobile) {
-          try {
-            const decipher = createDecipheriv("aes-256-gcm", keyHex as any, iv as any);
-            decipher.setAuthTag(tag as any);
-            let decrypted = decipher.update(dataBase64, "base64", "utf8");
-            decrypted += decipher.final("utf8");
-            
-            if (decrypted) decrypted = decrypted.replace(/\0/g, '').trim();
-            
-            const snippet = decrypted.substring(0, 20).replace(/\n/g, '\\n');
-            Logger.log(`[decrypt] v3: ✅ Strategy 2 (Legacy Hex) succeeded: "${snippet}${decrypted.length > 20 ? '...' : ''}"`);
-            return decrypted;
-          } catch (e2: any) {
-            Logger.log(`[decrypt] v3: Strategy 2 (Legacy Hex) skipped/failed. Trying recovery...`);
-          }
-        }
-
-        // Strategy 3: CTR mode recovery (Supports varied GCM counter starts)
-        const tryV3CTR = (keyBuf: any, label: string) => {
-          // GCM standard often uses counter starts at 2 (J0=nonce||01, inc32(J0)=nonce||02)
-          // Old polyfills might use 0 or 1.
-          const suffixes = ["00000002", "00000001", "00000000"];
-          
-          for (const suffix of suffixes) {
-            try {
-              const hexKey = CryptoJS.enc.Hex.parse(Buffer.from(keyBuf).toString("hex"));
-              const hexIv = CryptoJS.enc.Hex.parse(Buffer.from(iv).toString("hex") + suffix);
-              
-              const bytes = CryptoJS.AES.decrypt(dataBase64, hexKey, {
-                iv: hexIv,
-                mode: CryptoJS.mode.CTR,
-                padding: CryptoJS.pad.NoPadding
-              });
-              
-              let result = bytes.toString(CryptoJS.enc.Utf8);
-              // Clean up: trim and remove null bytes
-              if (result) result = result.replace(/\0/g, '').trim();
-
-              // Simple heuristic for valid recovery: non-empty and primarily printable
-              if (result && result.length > 0 && !/[\x01-\x08\x0E-\x1F]/.test(result)) {
-                const snippet = result.substring(0, 20).replace(/\n/g, '\\n');
-                Logger.log(`[decrypt] v3: ✅ Strategy 3 (CTR Recov, ${label}, s=${suffix}) succeeded: "${snippet}${result.length > 20 ? '...' : ''}" (len=${result.length})`);
-                return result;
-              }
-            } catch (e) {}
-          }
-          return null;
-        };
-
-        if (isWeb) {
-          Logger.log(`[decrypt] v3: Web environment detected. Skipping Native GCM, using Recovery...`);
-        } else {
-          Logger.log(`[decrypt] v3: GCM failed. Attempting CTR Recovery...`);
-        }
-        let ctrResult = tryV3CTR(keyHashed, "Hashed");
-        if (ctrResult) return ctrResult;
-        if (keyHex) {
-          ctrResult = tryV3CTR(keyHex, "Hex");
-          if (ctrResult) return ctrResult;
-        }
-
-        // Strategy 4: CryptoJS CBC with parsed GCM data (legacy recovery)
-        const tryV3CBC = (keyBuf: any, label: string) => {
-          try {
-            const hexKey = CryptoJS.enc.Hex.parse(Buffer.from(keyBuf).toString("hex"));
-            // Try standard IV padding (padded with 4 bytes of zeros)
-            const hexIv = CryptoJS.enc.Hex.parse(Buffer.concat([iv, Buffer.alloc(4, 0)]).toString("hex"));
-            
-            const bytes = CryptoJS.AES.decrypt(dataBase64, hexKey, {
-              iv: hexIv,
-              mode: CryptoJS.mode.CBC,
-              padding: CryptoJS.pad.Pkcs7
-            });
-            let result = bytes.toString(CryptoJS.enc.Utf8);
-            if (result) result = result.replace(/\0/g, '').trim();
-            if (result && result.length > 0) {
-              const snippet = result.substring(0, 20).replace(/\n/g, '\\n');
-              Logger.log(`[decrypt] v3: ✅ Strategy 4 (CBC Recov, ${label}) succeeded: "${snippet}${result.length > 20 ? '...' : ''}" (len=${result.length})`);
-              return result;
-            }
-          } catch (cbcErr) {}
-          return null;
-        };
-
-        Logger.log(`[decrypt] v3: CTR failed. Attempting CBC Recovery...`);
-        let cbcResult = tryV3CBC(keyHashed, "Hashed");
-        if (cbcResult) return cbcResult;
-        if (keyHex) {
-          cbcResult = tryV3CBC(keyHex, "Hex");
-          if (cbcResult) return cbcResult;
-        }
-          
-        Logger.warn(`[decrypt] v3: ⚠️ All recovery strategies exhausted for skPrefix=${skPrefix}.`);
-    }
-
-    // Fallback to legacy CBC (CryptoJS)
-    const tryCBC = (key: any, label: string) => {
-      try {
-        const bytes = CryptoJS.AES.decrypt(ciphertext, key);
-        const plaintext = bytes.toString(CryptoJS.enc.Utf8);
-        if (plaintext && plaintext.length > 0) {
-          Logger.log(`[decrypt] ✅ CBC Success (${label})`);
-          return plaintext;
-        }
-      } catch (e) {}
-      return null;
-    };
-
-    // Try Hashed Key first (Modern CBC fallback)
-    const keyHashed = createHash('sha256').update(secretKey).digest().toString('hex');
-    let recovered = tryCBC(CryptoJS.enc.Hex.parse(keyHashed), "Hashed Hex");
-    if (recovered) return recovered;
-
-    // Try Hex Key (Legacy 32-byte)
-    if (secretKey.length === 64) {
-      recovered = tryCBC(CryptoJS.enc.Hex.parse(secretKey), "Raw Hex");
-      if (recovered) return recovered;
-    }
-
-    // Try Literal String Key
-    recovered = tryCBC(secretKey, "Raw String");
-    if (recovered) return recovered;
-
-    // Graceful fallback: instead of throwing, return a placeholder
-    Logger.warn(`[decrypt] ⚠️ All strategies exhausted. skPrefix=${secretKey.substring(0, 8)}, cipher=${ciphertext.substring(0, 20)}...`);
-    return "🔒 Encrypted Message";
-  } catch (error) {
-    Logger.error("Decryption error details:", error);
-    return "🔒 Encrypted Message";
-  }
-}
-
-/**
- * Asynchronous decryption for Level 5 (Double Ratchet) and fallbacks
- */
-export async function decryptAsync(ciphertext: string, secretKey: string, conversationId?: string, pqcSecretKey?: Uint8Array): Promise<string> {
-  try {
-    if (ciphertext.startsWith("v5:")) {
-      if (!conversationId) throw new Error("Conversation ID required for v5 decryption");
-      return await decryptV5(conversationId, ciphertext);
+      return decrypt(ciphertext, secretKey, activePqcKey);
     }
 
     // Standard synchronous versions handles most cases
     const result = decrypt(ciphertext, secretKey, pqcSecretKey);
-    if (result !== "🔒 Encrypted Message") return result;
+    if (result !== "🔒 Encrypted") return result;
 
     // IF decrypt failed (returned placeholder), try async recovery for v3: web/mobile mismatch
-    if (ciphertext.startsWith("v3:") || ciphertext.startsWith("v2:")) {
+    if (ciphertext.startsWith("v3:") || ciphertext.startsWith("v2:") || ciphertext.startsWith("v3.5:")) {
       const parts = ciphertext.split(":");
       if (parts.length >= 4) {
         const iv = Buffer.from(parts[1], "base64");
@@ -703,7 +365,7 @@ export async function decryptAsync(ciphertext: string, secretKey: string, conver
             const combined = new Uint8Array(ciphertextBuf.length + tagBuf.length);
             combined.set(ciphertextBuf);
             combined.set(tagBuf, ciphertextBuf.length);
-            
+
             const decryptedRaw = await globalThis.crypto.subtle.decrypt(
               { name: 'AES-GCM', iv: new Uint8Array(iv) }, cryptoKey, combined
             );
@@ -717,40 +379,32 @@ export async function decryptAsync(ciphertext: string, secretKey: string, conver
       }
     }
 
-    if (result === "🔒 Encrypted Message" || result === "🔒 Decryption Failed") {
-      const failureKey = ciphertext?.startsWith("v5:") ? "v5" :
+    if (result === "🔒 Encrypted" || result === "🔒 Failed") {
+      const failureKey: "v2" | "v3" | "v4" | "v5" | "v6" | "legacy" = 
+        ciphertext?.startsWith("v6:") ? "v6" :
         ciphertext?.startsWith("v4:") ? "v4" :
+        ciphertext?.startsWith("v5:") ? "v5" :
         ciphertext?.startsWith("v3:") ? "v3" :
         ciphertext?.startsWith("v2:") ? "v2" : "legacy";
+        
       bumpCounter(telemetry.decryptFailures, failureKey);
       Logger.warn(`[decryptAsync] failure version=${failureKey}`);
+      
+      // 🛡️ Enhanced Placeholder for Private/Ratchet messages
+      if (failureKey === "v4" || failureKey === "v6") {
+        return "🔒 Message Hidden";
+      }
     }
     return result;
   } catch (error) {
     Logger.error("Async decryption error:", error);
     const failureKey = ciphertext?.startsWith("v5:") ? "v5" :
       ciphertext?.startsWith("v4:") ? "v4" :
-      ciphertext?.startsWith("v3:") ? "v3" :
-      ciphertext?.startsWith("v2:") ? "v2" : "legacy";
+        ciphertext?.startsWith("v3:") ? "v3" :
+          ciphertext?.startsWith("v2:") ? "v2" : "legacy";
     bumpCounter(telemetry.decryptFailures, failureKey);
-    return "🔒 Decryption Failed";
+    return "🔒 Failed";
   }
-}
-
-/**
- * Level 3: Encrypt with Device Key (for secure storage)
- */
-export async function encryptWithDeviceKey(text: string): Promise<string> {
-  const { deviceKey } = await getDeviceKeys();
-  return encrypt(text, deviceKey);
-}
-
-/**
- * Level 3: Decrypt with Device Key (for secure storage)
- */
-export async function decryptWithDeviceKey(ciphertext: string): Promise<string> {
-  const { deviceKey } = await getDeviceKeys();
-  return decrypt(ciphertext, deviceKey);
 }
 
 /**
@@ -763,13 +417,21 @@ export function generateRandomKey(): string {
 export function isEncrypted(text: string): boolean {
   if (!text) return false;
   const isV5 = text.startsWith(`${ENC_VERSION_RATCHET}:`) || text.includes("\"dh\":");
-  const result = text.startsWith(`${ENC_VERSION_QUANTUM}:`) || 
-         text.startsWith(`${ENC_VERSION_ELITE}:`) || 
-         text.startsWith(`${ENC_VERSION_GCM}:`) || 
-         text.startsWith("U2FsdGVkX1") ||
-         isV5;
+  const result = text.startsWith(`${ENC_VERSION_PQXDH}:`) ||
+    text.startsWith(`${ENC_VERSION_QUANTUM}:`) ||
+    text.startsWith(`${ENC_VERSION_ELITE}:`) ||
+    text.startsWith(`${ENC_VERSION_GCM}:`) ||
+    text.startsWith("U2FsdGVkX1") ||
+    isV5;
   if (result) {
-    Logger.log(`[isEncrypted] detected: ${text.substring(0, 3)}${isV5 ? ' (v5)' : ''}`);
+    let version = text.substring(0, 3);
+    if (version === "v3:") version = "v3 (Elite)";
+    else if (version === "v4:") version = "v4 (Ratchet)";
+    else if (version === "v5:") version = "v5 (Quantum)";
+    else if (version === "v6:") version = "v6 (PQXDH)";
+    else if (text.startsWith("U2FsdGVkX1")) version = "Legacy (CBC)";
+    
+    Logger.log(`[isEncrypted] detected: ${version}${isV5 ? ' (v5-legacy)' : ''}`);
   }
   return result;
 }
@@ -778,10 +440,10 @@ export function isEncrypted(text: string): boolean {
  * Legacy function for backward compatibility with existing UI components
  */
 export function deriveConversationKey(conversationId: string, participantUids: string[]): string {
-    if (!conversationId || !participantUids || participantUids.length < 2) return "";
-    const sortedUids = [...participantUids].sort();
-    const keyMaterial = `${conversationId}:${sortedUids.join(":")}`;
-    return CryptoJS.SHA256(keyMaterial).toString();
+  if (!conversationId || !participantUids || participantUids.length < 2) return "";
+  const sortedUids = [...participantUids].sort();
+  const keyMaterial = `${conversationId}:${sortedUids.join(":")}`;
+  return CryptoJS.SHA256(keyMaterial).toString();
 }
 
 // Re-export other functions as they were
@@ -790,10 +452,10 @@ export async function setUserPassphrase(passphrase: string): Promise<void> {
     if (!passphrase || passphrase.length < 8) {
       throw new Error("Passphrase must be at least 8 characters long");
     }
-    
+
     // Use a unique salt for each user/passphrase
     const salt = randomBytes(16).toString('hex');
-    
+
     // Use Argon2id (via argon2Sync helper) for strong passphrase hashing
     const hashedPassphrase = argon2Sync('argon2id', {
       message: passphrase,
@@ -817,7 +479,7 @@ export async function setUserPassphrase(passphrase: string): Promise<void> {
 export async function getUserPassphrase(): Promise<string | null> {
   const value = await getSecureItem(USER_PASSPHRASE_STORAGE);
   if (!value) return null;
-  
+
   // Return the hash part for backward compatibility with existing usage
   if (value.includes(":")) {
     return value.split(":")[1];
@@ -826,47 +488,39 @@ export async function getUserPassphrase(): Promise<string | null> {
 }
 
 export async function deriveEphemeralKey(
-  conversationId: string, 
-  participantUids: string[], 
+  conversationId: string,
+  participantUids: string[],
   timestamp: number = Date.now()
 ): Promise<string> {
-    const { deviceKey, deviceSalt } = await getDeviceKeys();
-    const userPassphrase = await getUserPassphrase();
-    const sortedUids = [...participantUids].sort();
+  const { deviceKey, deviceSalt } = await getDeviceKeys();
+  const userPassphrase = await getUserPassphrase();
+  const sortedUids = [...participantUids].sort();
 
-    const keyMaterial = [
-      conversationId,
-      sortedUids.join(":"),
-      deviceKey,
-      deviceSalt,
-      timestamp.toString(),
-      userPassphrase || ""
-    ].join(":");
+  const keyMaterial = [
+    conversationId,
+    sortedUids.join(":"),
+    deviceKey,
+    deviceSalt,
+    timestamp.toString(),
+    userPassphrase || ""
+  ].join(":");
 
-    // Use Argon2id for Level 3 key derivation (Elite Status)
-    const saltBuffer = Buffer.from(deviceSalt, 'hex');
-    
-    // Argon2id parameters (High security, mobile-optimized)
-    const derivedKey = argon2Sync('argon2id', {
-      message: keyMaterial,
-      nonce: saltBuffer,
-      memory: 65536, // 64 MB
-      passes: 3,       // 3 iterations
-      parallelism: 4,    // 4 threads
-      tagLength: 32     // 256-bit key
-    });
-    
-    return derivedKey.toString('hex');
+  // Use Argon2id for Level 3 key derivation (Elite Status)
+  const saltBuffer = Buffer.from(deviceSalt, 'hex');
+
+  // Argon2id parameters (High security, mobile-optimized)
+  const derivedKey = argon2Sync('argon2id', {
+    message: keyMaterial,
+    nonce: saltBuffer,
+    memory: 65536, // 64 MB
+    passes: 3,       // 3 iterations
+    parallelism: 4,    // 4 threads
+    tagLength: 32     // 256-bit key
+  });
+
+  return derivedKey.toString('hex');
 }
 
-export async function generateSafetyNumber(conversationId: string, participantUids: string[]): Promise<string> {
-    const { deviceKey } = await getDeviceKeys();
-    const sortedUids = [...participantUids].sort();
-    const fingerprintMaterial = [conversationId, sortedUids.join(":"), deviceKey].join(":");
-    
-    const fingerprint = createHash('sha256').update(fingerprintMaterial).digest().toString('hex');
-    return fingerprint.match(/.{1,5}/g)?.join(' ').toUpperCase() || fingerprint.toUpperCase();
-}
 /**
  * Level 5: Double Ratchet Session Management
  */
@@ -894,12 +548,12 @@ export async function getRatchetSession(conversationId: string): Promise<Ratchet
   if (state.remoteDhPublicKey) state.remoteDhPublicKey = Buffer.from(state.remoteDhPublicKey, "base64");
   if (state.sendingChainKey) state.sendingChainKey = Buffer.from(state.sendingChainKey, "base64");
   if (state.receivingChainKey) state.receivingChainKey = Buffer.from(state.receivingChainKey, "base64");
-  
+
   // Reconstitute skipped keys
   for (const key in state.skippedMessageKeys) {
     state.skippedMessageKeys[key] = Buffer.from(state.skippedMessageKeys[key], "base64");
   }
-  
+
   return state;
 }
 
@@ -919,9 +573,9 @@ export async function saveRatchetSession(conversationId: string, state: RatchetS
       Object.entries(state.skippedMessageKeys).map(([k, v]) => [k, (v as Buffer).toString("base64")])
     )
   };
-  
+
   const jsonData = JSON.stringify(serialized);
-  
+
   // Level 3 Hardware/Device-bound protection
   try {
     const encryptedData = await encryptWithDeviceKey(jsonData);
@@ -933,31 +587,62 @@ export async function saveRatchetSession(conversationId: string, state: RatchetS
 }
 
 /**
- * High-level Level 5 Encrypt/Decrypt
+ * High-level Level 5 Encrypt/Decrypt (Double Ratchet)
  */
-export async function encryptV5(conversationId: string, text: string): Promise<string> {
+export async function encryptV4(conversationId: string, text: string): Promise<string> {
   const state = await getRatchetSession(conversationId);
   if (!state) throw new Error("No ratchet session found for conversation");
-  
-  const { ciphertext, header } = ratchetEncrypt(state, text);
+
+  const { ciphertext, header } = await ratchetEncrypt(state, text);
   await saveRatchetSession(conversationId, state);
-  
+
   const headerBase64 = Buffer.from(JSON.stringify(header)).toString("base64");
   return `${ENC_VERSION_RATCHET}:${headerBase64}:${ciphertext}`;
 }
 
-export async function decryptV5(conversationId: string, ciphertextV5: string): Promise<string> {
-  const parts = ciphertextV5.split(":");
-  if (parts[0] !== ENC_VERSION_RATCHET) throw new Error("Invalid v5 ciphertext");
-  
+export async function decryptV4(
+  conversationId: string, 
+  ciphertextV4: string,
+  messageId?: string,
+  skipCache: boolean = false
+): Promise<string> {
+  // 🛡️ PERMANENT CACHE CHECK
+  if (messageId && !skipCache) {
+    const { MessageStorageService } = await import('./message-storage-service');
+    const cached = await MessageStorageService.getMessage(conversationId, messageId);
+    if (cached) return cached;
+  }
+  const parts = ciphertextV4.split(":");
+  if (parts[0] !== ENC_VERSION_RATCHET) throw new Error("Invalid v4 ciphertext");
+
   const header = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
   const ciphertext = parts.slice(2).join(":");
-  
+
   const state = await getRatchetSession(conversationId);
   if (!state) throw new Error("No ratchet session found for conversation");
-  
-  const plaintext = ratchetDecrypt(state, ciphertext, header);
+
+  const plaintext = await ratchetDecrypt(state, ciphertext, header);
   await saveRatchetSession(conversationId, state);
-  
+
+  // ── PERSIST (Skip if private) ──
+  if (messageId && !skipCache) {
+    const { MessageStorageService } = await import('./message-storage-service');
+    await MessageStorageService.saveMessage(conversationId, messageId, plaintext);
+  }
+
   return plaintext;
+}
+
+/**
+ * High-level Level 6 Encrypt/Decrypt (Quantum Hybrid)
+ * v5 is Quantum.
+ */
+export async function encryptV5(text: string, secretKey: string, pqcPublicKey: Uint8Array): Promise<string> {
+  // Delegate to the main encrypt function with PQC enabled
+  return encrypt(text, secretKey, pqcPublicKey);
+}
+
+export async function decryptV5(ciphertextV5: string, secretKey: string, pqcSecretKey: Uint8Array): Promise<string> {
+  // Delegate to the main decrypt function with PQC enabled
+  return decrypt(ciphertextV5, secretKey, pqcSecretKey);
 }

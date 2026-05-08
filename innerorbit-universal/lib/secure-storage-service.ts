@@ -202,18 +202,36 @@ class SecureStorageServiceClass {
                 if (password) await SecureStore.setItemAsync(STORAGE_KEYS.SAVED_PASSWORD, password);
                 if (userId) await SecureStore.setItemAsync(STORAGE_KEYS.USER_ID, userId);
             } else {
-                // Use AsyncStorage on web/desktop (with encryption)
-                if (email) {
-                    const encryptedEmail = await encryptWithDeviceKey(email);
-                    await AsyncStorage.setItem(STORAGE_KEYS.SAVED_EMAIL, encryptedEmail);
-                }
-                if (password) {
-                    const encryptedPassword = await encryptWithDeviceKey(password);
-                    await AsyncStorage.setItem(STORAGE_KEYS.SAVED_PASSWORD, encryptedPassword);
-                }
-                if (userId) {
-                    const encryptedUserId = await encryptWithDeviceKey(userId);
-                    await AsyncStorage.setItem(STORAGE_KEYS.USER_ID, encryptedUserId);
+                // Check if we are in Electron and have safeStorage
+                const electron = (globalThis as any).window?.electron;
+                if (electron && electron.safeStorage) {
+                    // Level 5 Hardware Hardening for Desktop (TPM/DPAPI)
+                    if (email) {
+                        const res = await electron.safeStorage.encrypt(email);
+                        if (res.success) await AsyncStorage.setItem(STORAGE_KEYS.SAVED_EMAIL, res.encrypted);
+                    }
+                    if (password) {
+                        const res = await electron.safeStorage.encrypt(password);
+                        if (res.success) await AsyncStorage.setItem(STORAGE_KEYS.SAVED_PASSWORD, res.encrypted);
+                    }
+                    if (userId) {
+                        const res = await electron.safeStorage.encrypt(userId);
+                        if (res.success) await AsyncStorage.setItem(STORAGE_KEYS.USER_ID, res.encrypted);
+                    }
+                } else {
+                    // Standard Web: Use AsyncStorage with software encryption
+                    if (email) {
+                        const encryptedEmail = await encryptWithDeviceKey(email);
+                        await AsyncStorage.setItem(STORAGE_KEYS.SAVED_EMAIL, encryptedEmail);
+                    }
+                    if (password) {
+                        const encryptedPassword = await encryptWithDeviceKey(password);
+                        await AsyncStorage.setItem(STORAGE_KEYS.SAVED_PASSWORD, encryptedPassword);
+                    }
+                    if (userId) {
+                        const encryptedUserId = await encryptWithDeviceKey(userId);
+                        await AsyncStorage.setItem(STORAGE_KEYS.USER_ID, encryptedUserId);
+                    }
                 }
             }
             Logger.log('[SecureStorage] Credentials saved securely');
@@ -245,9 +263,27 @@ class SecureStorageServiceClass {
                 const encryptedPassword = await AsyncStorage.getItem(STORAGE_KEYS.SAVED_PASSWORD);
                 const encryptedUserId = await AsyncStorage.getItem(STORAGE_KEYS.USER_ID);
 
-                email = encryptedEmail ? await decryptWithDeviceKey(encryptedEmail) : null;
-                password = encryptedPassword ? await decryptWithDeviceKey(encryptedPassword) : null;
-                userId = encryptedUserId ? await decryptWithDeviceKey(encryptedUserId) : null;
+                // Check for Electron Hardware Decryption
+                const electron = (globalThis as any).window?.electron;
+                if (electron && electron.safeStorage) {
+                    if (encryptedEmail) {
+                        const res = await electron.safeStorage.decrypt(encryptedEmail);
+                        email = res.success ? res.decrypted : null;
+                    }
+                    if (encryptedPassword) {
+                        const res = await electron.safeStorage.decrypt(encryptedPassword);
+                        password = res.success ? res.decrypted : null;
+                    }
+                    if (encryptedUserId) {
+                        const res = await electron.safeStorage.decrypt(encryptedUserId);
+                        userId = res.success ? res.decrypted : null;
+                    }
+                } else {
+                    // Standard Web Software Decryption
+                    email = encryptedEmail ? await decryptWithDeviceKey(encryptedEmail) : null;
+                    password = encryptedPassword ? await decryptWithDeviceKey(encryptedPassword) : null;
+                    userId = encryptedUserId ? await decryptWithDeviceKey(encryptedUserId) : null;
+                }
             }
 
             return { email, password, userId };
