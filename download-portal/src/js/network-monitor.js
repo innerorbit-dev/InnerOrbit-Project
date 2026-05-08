@@ -178,11 +178,14 @@
         showStatus();
     }
 
+    // MASTER SWITCH: Change to true to enable Service Worker, false to disable
+    const ENABLE_SERVICE_WORKER = false;
+
     // Initialize
     window.addEventListener('load', () => {
-        // Register Service Worker for Offline Support (with error handling)
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/src/sw.js')
+        // Register Service Worker for Offline Support (Controlled by Master Switch)
+        if ('serviceWorker' in navigator && ENABLE_SERVICE_WORKER) {
+            navigator.serviceWorker.register('/sw.js')
                 .then(reg => console.log('[NetMonitor] SW Registered'))
                 .catch(err => {
                     // Service Worker registration failed - continue without it

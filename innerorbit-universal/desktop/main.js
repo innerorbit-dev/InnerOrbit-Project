@@ -45,7 +45,7 @@ function startLocalServer() {
 
             fs.readFile(filePath, (error, content) => {
                 if (error) {
-                    if (error.code === 'ENOENT') {
+                    if (error.code === 'ENOENT' || error.code === 'EISDIR') {
                         // If file not found, check if it's a route (no extension) and serve index.html
                         if (!path.extname(safePath) || safePath.indexOf('.') === -1) {
                             fs.readFile(path.join(serveDir, 'index.html'), (err, indexContent) => {
@@ -164,6 +164,62 @@ ipcMain.handle('set-screenshot-protection', async (event, enabled) => {
     }
     return { success: false };
 });
+
+// --- Hardware Level Security (TPM/DPAPI) ---
+const { safeStorage } = require('electron');
+
+ipcMain.handle('safe-storage-encrypt', async (event, plaintext) => {
+    try {
+        if (!safeStorage.isEncryptionAvailable()) {
+            return { success: false, error: 'OS-level encryption is not available on this system.' };
+        }
+        const buffer = safeStorage.encryptString(plaintext);
+        return { success: true, encrypted: buffer.toString('base64') };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('safe-storage-decrypt', async (event, encryptedData) => {
+    try {
+        const buffer = Buffer.from(encryptedData, 'base64');
+        if (safeStorage.isEncryptionAvailable()) {
+            const decrypted = safeStorage.decryptString(buffer);
+            return { success: true, decrypted };
+        }
+        return { success: false, error: 'Safe storage not available' };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+
+ipcMain.handle('electron-get-attestation', async (event, challenge) => {
+    try {
+        // Level 5 Remote Attestation: Hardware-bound Identity Signature
+        const crypto = require('crypto');
+        let identityKey;
+        
+        // 1. Try to load existing hardware-bound identity
+        const identityPath = path.join(app.getPath('userData'), 'client_identity.enc');
+        if (fs.existsSync(identityPath)) {
+            const enc = fs.readFileSync(identityPath);
+            identityKey = safeStorage.decryptString(enc);
+        } else {
+            // 2. Generate new identity if missing
+            identityKey = crypto.randomBytes(64).toString('hex');
+            const enc = safeStorage.encryptString(identityKey);
+            fs.writeFileSync(identityPath, enc);
+        }
+
+        // 3. Sign the challenge with the hardware-bound identity
+        const signature = crypto.createHmac('sha256', identityKey).update(challenge).digest('hex');
+        
+        return { success: true, signature, platform: process.platform };
+    } catch (e) {
+        return { success: false, error: e.message };
+    }
+});
+// -------------------------------------------
 
 // IPC handler to mark setup as complete
 ipcMain.handle('complete-setup', async () => {

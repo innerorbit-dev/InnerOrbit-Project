@@ -1,6 +1,6 @@
-/** Purpose: Random, non-sequential User ID and PIN generation with uniqueness validation in Firestore. */
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "./firebase";
+import { randomBytes } from "./crypto-wrapper";
 
 /**
  * User ID Generator Utility for InnerOrbit
@@ -86,8 +86,9 @@ function generateRandomId() {
   const maxAttempts = 100;
 
   do {
-    // Generate random number between 0 and 9999
-    const randomNum = Math.floor(Math.random() * 10000);
+    // Generate random number between 0 and 9999 using secure bytes
+    const buf = randomBytes(2);
+    const randomNum = ((buf[0] << 8) | buf[1]) % 10000;
     id = randomNum.toString().padStart(4, "0");
     attempts++;
 
@@ -198,8 +199,9 @@ export async function findUserById(userId) {
  * @returns A valid 6-digit PIN string
  */
 function generateRandomPin() {
-  // Generate random number between 0 and 999999
-  const randomNum = Math.floor(Math.random() * 1000000);
+  // Generate random number between 0 and 999999 using secure bytes
+  const buf = randomBytes(4);
+  const randomNum = buf.readUInt32BE(0) % 1000000;
   return randomNum.toString().padStart(6, "0");
 }
 

@@ -4,6 +4,19 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import * as Encryption from '../encryption';
 
+// Mock react-native so Platform.OS is mutable per describe block
+jest.mock('react-native', () => ({
+    Platform: { OS: 'ios' }
+}));
+
+// Mock utils/platform with dynamic getters so beforeAll(Platform.OS = ...) takes effect
+jest.mock('../../utils/platform', () => ({
+    get isMobile() { return require('react-native').Platform.OS !== 'web'; },
+    get isWeb() { return require('react-native').Platform.OS === 'web'; },
+    get isIOS() { return require('react-native').Platform.OS === 'ios'; },
+    get isAndroid() { return require('react-native').Platform.OS === 'android'; },
+}));
+
 // Mock Dependencies
 jest.mock('@react-native-async-storage/async-storage', () => ({
     getItem: jest.fn(),

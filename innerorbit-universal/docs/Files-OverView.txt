@@ -1,20 +1,22 @@
-INNERORBIT PROJECT FILES OVERVIEW AND ARCHITECTURE
+INNERORBIT PROJECT FILES OVERVIEW AND ARCHITECTURE (May 2026 Update)
 
-This document provides a breakdown of the codebase, categorizing files into Frontend and Backend/Integration roles, and explains the Firebase integration architecture.
+This document provides a comprehensive breakdown of the codebase, categorizing files into Frontend, Backend/Integration, and High-Assurance Security roles.
 
 1. ARCHITECTURE SUMMARY
 
-This application uses a Serverless Architecture.
-- Frontend: Built with React Native (Expo) for Mobile and Web.
-- Backend: There is no dedicated Node.js server to deploy. The Backend is fully managed by Firebase (Google's backend-as-a-service platform).
-- Integration: The application connects directly to Firebase services (Firestore, Auth, Storage) via the Firebase JS SDK, wrapped in service modules located in the lib/ directory.
+This application uses a Hybrid Serverless Architecture.
+- Frontend: Built with React Native (Expo) for Mobile/Web and Electron for Desktop.
+- Primary Backend: Firebase (Managed). All real-time signaling and auth are handled by Google's backend-as-a-service.
+- High-Assurance Core: Decoupled cryptographic primitives (`innerorbit-universal/lib/encryption-core.ts`) ensure that the backend never sees plaintext.
 
 2. FILE CLASSIFICATION
+
 
 A. FRONTEND (UI, Navigation, State)
 These files are responsible for what the user sees and interacts with.
 
    /app (Expo Router - Navigation Logic)
+
      _layout.js: Main entry point, sets up Providers (Auth, Theme, Network).
      index.js: Landing page / logic to redirect to Login or Home.
      login.js, signup.js: Authentication screens.
@@ -30,111 +32,68 @@ These files are responsible for what the user sees and interacts with.
 
    /context (Global State Management)
      auth-context.js: Manages user login state vs. Decoy Mode state.
-     theme-context.js: Handles Dark/Light mode switching.
+     theme-store.ts: Handles Dark/Light mode switching (Zustand).
      network-context.js: Monitors internet connectivity.
 
-B. BACKEND INTERFACE (Service Layer)
-These files technically run on the Frontend device but serve as the Backend Connector. They replace the traditional API routes you might find in a REST server.
+B. BACKEND INTERFACE & SECURITY (Service Layer)
+These files run on the device but serve as the Backend Connector and Encryption Engine.
 
    /lib (Service Modules)
+     encryption-core.ts: [NEW] Decoupled synchronous primitives for PQC (ML-KEM) and AES-SIV.
+     encryption.ts: High-level orchestrator for cascading fallback and session management.
+     device-storage-service.ts: [HARDENED] Centralized hardware-binding (TPM, Secure Enclave, WebAuthn).
+     ratchet.ts: Implementation of Protocol v6 (PQXDH) Double Ratchet logic.
      firebase.js: The Bridge. Initializes the connection to Firebase using API keys.
-     firestore-service.js: The Database API. Contains functions to Read/Write data (e.g., sendMessage, createUserProfile).
-     auth-service.js: Helper functions for custom auth (PIN login logic).
-     secure-storage-service.js: Manages encrypted local storage of credentials (keychain/keystore).
+     firestore-service.js: The Database API. Contains functions to Read/Write data (e.g., sendMessage).
      notification-service.js: Handles Push Notifications via Firebase Cloud Messaging (FCM).
 
 3. FIREBASE INTEGRATION DETAILS
 
-The Backend is composed of three main Firebase services, integrated as follows:
+The Backend is composed of three main Firebase services:
 
    1. Authentication (Firebase Auth)
    File: lib/firebase.js, context/auth-context.js
    Integration:
-     The app uses firebase.auth() authentication.
-     Standard Login (Email/Password) and Google Sign-In talk directly to Firebase servers to return a User Token.
-     PIN Login: This is a custom logic in auth-context.js. It validates a 6-digit PIN against the users collection in Firestore without needing a full Firebase Re-auth.
+     Standard Login (Email/Password) and Google Sign-In talk directly to Firebase servers.
+     PIN Login: Custom logic in auth-context.js validates a PIN against the users collection.
 
    2. Database (Cloud Firestore)
    File: lib/firestore-service.js
    Integration:
-     The app uses a NoSQL document structure (users, conversations).
-     Real-time: The app uses onSnapshot listeners to maintain a live connection. When data changes on the Firebase Backend, these listeners instantly update the Frontend UI without manual refreshing.
-     CRUD Operations: React components call exported functions like sendMessage() or markMessageAsRead(), which execute addDoc or updateDoc commands against the remote database.
+     NoSQL document structure (users, conversations).
+     Real-time: Uses onSnapshot listeners for live updates.
+     CRUD Operations: Components call functions like sendMessage() to execute writes.
 
    3. File Storage (Firebase Storage)
    File: lib/firebase.js
    Integration:
      Used for Profile Pictures and Chat Image attachments.
-     Images are uploaded as Blobs directly from the device to Firebase Storage buckets.
-     The resulting Download URL is stored in Firestore messages to be displayed in the Chat UI.
+     Images are uploaded as Blobs. The resulting Download URL is stored in Firestore.
 
 4. DATA FLOW EXAMPLES
 
-Practical walkthroughs of common user actions showing the link between Frontend and Backend processes.
-
-   Scenario A: User Sends a Message
-   1. Frontend: User types text in ChatDetail.js and hits Send.
-   2. Action: ChatDetail.js calls sendMessage() (imported from lib/firestore-service.js).
-   3. Backend Interface: sendMessage() constructs a data object and calls standard Firebase addDoc() to write to the messages collection in the cloud.
-   4. Backend Processing: Firebase accepts the write (if security rules pass).
-   5. Consumption (Real-time):
-      The recipient's app has an onSnapshot() listener active in their ChatDetail.js.
-      Firebase pushes the new message data to that listener instantly.
-      The React state updates, and the new message appears on the screen.
+   Scenario A: User Sends a PQXDH (v6) Message
+   1. Frontend: User types text and hits Send.
+   2. Encryption: `encryption.ts` calls `ratchet.ts` to rotate keys.
+   3. Hardening: `encryption-core.ts` locks the payload using AES-256-GCM-SIV.
+   4. Backend: `firestore-service.js` writes the encrypted ciphertext to the cloud.
+   5. Consumption: The recipient's app receives the update via onSnapshot and decrypts using its local ratchets.
 
    Scenario B: User Creates an Account (Sign Up)
-   1. Frontend: User enters Email/Password in signup.js forms and clicks Sign Up.
-   2. Action: signup.js calls signUp(email, password) from context/auth-context.js.
-   3. Auth Process: auth-context calls firebase.auth().createUserWithEmailAndPassword().
-      Backend: Firebase Auth server verifies the request and creates a unique uid.
-   4. Profile Creation: Upon success, auth-context immediately calls createUserProfile(user) from lib/firestore-service.js.
-      Backend Interface: createUserProfile runs a Firestore Transaction to generate a unique 4-digit User ID and 6-digit PIN.
-      Backend: Firestore writes a new document to the users collection with this metadata.
-   5. State Update: The AuthContext detects the new user object and updates the global user state, redirecting the App Navigation (_layout.js) to the Home screen.
+   1. Frontend: User enters Email/Password in signup.js.
+   2. Action: signup.js calls signUp() from auth-context.js.
+   3. Auth: Firebase Auth server verifies and creates a unique uid.
+   4. Profile Creation: auth-context calls createUserProfile() from firestore-service.js.
+   5. Result: A new document is written to the users collection with metadata.
 
-   Scenario C: User Logs In (Standard)
-   1. Frontend: User enters Credentials in login.js avoiding the Stealth fake errors.
-   2. Action: login.js calls signIn(email, password) from context/auth-context.js.
-   3. Auth Process: auth-context calls firebase.auth().signInWithEmailAndPassword().
-      Backend: Firebase Auth validates the hash and returns a session token.
-   4. State Update:
-      auth.onAuthStateChanged listener in AuthProvider fires.
-      Global user state is set to the logged-in user.
-      isDecoyMode is set to false (Unlocking the app).
-   5. Navigation: _layout.js observes user is present and isDecoyMode is false, so it navigates from login to home.
+5. FUTURE INFRASTRUCTURE (R&D)
 
-   Scenario D: User Changes Settings (Controls)
+- oracle-server-backend/: Future Node.js/Python signaling layer for Level 8 deployments.
+- Media Vault (Phase 7): AEGIS-256 implementation for ultra-high-speed 4K encrypted video.
+- Key Sharding (v7): Splitting master keys into 3 physical shards.
 
-   Sub-Scenario D1: Changing a Local Setting (e.g., Theme/Dark Mode)
-   1. Frontend: User toggles Dark Mode in Settings.js.
-   2. Action: Calls toggleTheme() from context/theme-context.js.
-   3. Processing:
-      theme-context updates the React State (immediate UI change).
-      It also calls AsyncStorage.setItem('theme', 'dark').
-   4. Result: This data stays Local Only on the device. No backend communication occurs.
+6. SECURITY AUDIT GUIDELINES
 
-   Sub-Scenario D2: Changing a Server Setting (e.g., Bio or Profile Pickup)
-   1. Frontend: User edits their Bio in Settings.js and clicks Save.
-   2. Action: Settings.js calls updateUserProfile(uid, { bio: newText }) from lib/firestore-service.js.
-   3. Backend Interface: updateUserProfile calls setDoc(..., { merge: true }) targeting the specific document in the users Firestore collection.
-   4. Backend Processing: Firestore updates the document in the cloud.
-   5. Reflection: Any other user viewing this profile (e.g., in a Chat) who has a subscribeToUserProfile listener active will see the new Bio update instantly.
-   - [ ] No console errors related to CSP
-
----
-
-## 5. FUTURE INFRASTRUCTURE (R&D)
-
-The following components are currently in development/research phase:
-
-- **oracle-server-backend/**: Future Oracle-based backend.
-  - **Status**: R&D. Currently used for frontend verification and future backend (preparation).
-
----
-
-## 6. SECURITY AUDIT GUIDELINES
-
-When auditing the encryption system, always refer to the [ENCRYPTION_GUIDE.md](./ENCRYPTION_GUIDE.md) for protocol specifications.
-- **KDF Invariance**: Never modify the Key Derivation Function of existing levels.
-- **Recovery Engine**: Any new decryption logic must be added as a prioritized Strategy to prevent locking existing data.
-- **Platform Parity**: Verify that any core crypto change is shimmed correctly for both Web (CryptoJS/Noble) and Native (Expo).
+- KDF Invariance: Never modify the Key Derivation Function of existing levels.
+- Cascading Recovery: Any new decryption logic must follow the v6 -> v5.5 -> v5 -> v3.5 chain.
+- Hardware Binding: Verify that all keys are bound to physical hardware via `device-storage-service.ts`.

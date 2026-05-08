@@ -46,6 +46,7 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
       const getCipherVersion = (conv) => {
         if (conv?.lastMessageEncVersion) return conv.lastMessageEncVersion;
         const text = conv?.lastMessage || "";
+        if (text.startsWith("v6:")) return "v6";
         if (text.startsWith("v5:")) return "v5";
         if (text.startsWith("v4:")) return "v4";
         if (text.startsWith("v3:")) return "v3";
@@ -68,7 +69,8 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
                 if (isEncrypted(preview)) {
                   try {
                     const key = deriveConversationKey(conv.id, conv.participantIds);
-                    preview = await decryptAsync(preview, key, conv.id);
+                    const otherUid = conv.participantIds.find(id => id !== user.uid);
+                    preview = await decryptAsync(preview, key, conv.id, undefined, user.uid, otherUid);
                     if (preview === "🔒 Encrypted Message" || preview === "🔒 Decryption Failed") {
                       Logger.warn(`[useConversations] Notification decrypt failed conv=${conv.id.substring(0, 5)} version=${getCipherVersion(conv)}`);
                     }
@@ -106,16 +108,33 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
                 } catch (e) { }
 
                 let lastMessage = conv.lastMessage;
-                if (isEncrypted(lastMessage)) {
-                  try {
-                    const key = deriveConversationKey(conv.id, conv.participantIds);
-                    Logger.log(`[useConversations] 🔑 Decrypt: conv=${conv.id.substring(0,5)}, pIds=${conv.participantIds?.length}, skPrefix=${key.substring(0,8)}`);
-                    lastMessage = await decryptAsync(lastMessage, key, conv.id);
-                    if (lastMessage === "🔒 Encrypted Message" || lastMessage === "🔒 Decryption Failed") {
-                      Logger.warn(`[useConversations] Preview decrypt failed conv=${conv.id.substring(0, 5)} version=${getCipherVersion(conv)}`);
+                const clearedAt = conv[`clearedAt_${user.uid}`]?.toMillis() || 0;
+                const lastTime = conv.lastMessageTime?.toMillis() || 0;
+
+                // Debug log to trace why preview might still show
+                if (lastTime > 0 && clearedAt > 0) {
+                   Logger.log(`[useConversations] Check Clear: conv=${conv.id.substring(0,5)} lastTime=${lastTime} clearedAt=${clearedAt} (Diff: ${lastTime - clearedAt}ms)`);
+                }
+
+                if (clearedAt > 0 && lastTime <= (clearedAt + 1000)) { // 1s buffer for sync
+                  lastMessage = "";
+                } else if (isEncrypted(lastMessage)) {
+                  // v6 (PQXDH) ratchet keys are consumed after first decrypt — can't
+                  // re-decrypt for the list preview. Show blank (no technical text).
+                  if (lastMessage.startsWith("v6:")) {
+                    lastMessage = "";
+                  } else {
+                    try {
+                      const key = deriveConversationKey(conv.id, conv.participantIds);
+                      Logger.log(`[useConversations] 🔑 Decrypt: conv=${conv.id.substring(0,5)}, pIds=${conv.participantIds?.length}, skPrefix=${key.substring(0,8)}`);
+                      lastMessage = await decryptAsync(lastMessage, key, conv.id, undefined, user.uid, otherUserUid);
+                      if (lastMessage === "🔒 Encrypted Message" || lastMessage === "🔒 Decryption Failed") {
+                        Logger.warn(`[useConversations] Preview decrypt failed conv=${conv.id.substring(0, 5)} version=${getCipherVersion(conv)}`);
+                        lastMessage = "";
+                      }
+                    } catch (e) {
+                      lastMessage = "";
                     }
-                  } catch (e) {
-                    lastMessage = "🔒 Encrypted Message";
                   }
                 }
 

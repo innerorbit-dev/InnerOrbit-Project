@@ -1,26 +1,28 @@
 <!DOCTYPE html>
 <!-- InnerOrbit Portal v1.0.1 -->
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>InnerOrbit - Secure Access Portal</title>
-    <meta name="description" content="Secure access portal for InnerOrbit application downloads. Authorized personnel only.">
+    <meta name="description"
+        content="Secure access portal for InnerOrbit application downloads. Authorized personnel only.">
     <meta name="keywords" content="InnerOrbit, CalcX, Secure Download, Android App, APK, Encrypted Chat, Portal">
-    
+
     <!-- ADDED: Noindex for Security/Privacy -->
     <meta name="robots" content="noindex, nofollow">
 
     <!-- Theme Initialization: Prevent flicker by applying theme before render -->
     <script>
-        (function() {
+        (function () {
             const savedTheme = localStorage.getItem('innerorbit-theme') || 'default';
             if (savedTheme !== 'default') {
                 document.documentElement.setAttribute('data-theme', savedTheme);
             }
         })();
     </script>
-    
+
     <!-- Favicons -->
     <link rel="icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
     <link rel="shortcut icon" type="image/webp" href="assets/favicons/access-portal-favicon.webp">
@@ -30,18 +32,18 @@
     <!-- React & ReactDOM -->
     <script src="js/vendor/react.min.js"></script>
     <script src="js/vendor/react-dom.min.js"></script>
-    
+
     <!-- Babel for JSX -->
     <script src="js/vendor/babel.min.js"></script>
-    
+
     <!-- AngularJS -->
     <script src="js/vendor/angular.min.js"></script>
-    
+
     <!-- Animations -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
     <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.29/bundled/lenis.min.js"></script>
-    
+
     <!-- Authentication Logic -->
     <script src="js/authentication.js"></script>
     <!-- Angular Docs Logic -->
@@ -52,20 +54,8 @@
 
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    
-    <script>
-        const firebaseConfig = { 
-            apiKey: "AIzaSyBZIRJuQ4Ltn_c8ciqykG5KUvHXSFzTy_w", 
-            authDomain: "innerorbit-portal.firebaseapp.com", 
-            projectId: "innerorbit-portal", 
-            storageBucket: "innerorbit-portal.firebasestorage.app", 
-            messagingSenderId: "616184841875", 
-            appId: "1:616184841875:web:133ebb0b367f983e2d6f66", 
-            measurementId: "G-FRBP7HBBGD" 
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-    </script>
+
+    <script src="js/firebase-config.js"></script>
     <style>
         * {
             margin: 0;
@@ -80,8 +70,15 @@
         }
 
         @keyframes portalPulse {
-            0% { transform: translate(-50%, -50%) scale(0); opacity: 1; }
-            100% { transform: translate(-50%, -50%) scale(3); opacity: 0; }
+            0% {
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(-50%, -50%) scale(3);
+                opacity: 0;
+            }
         }
 
         /* 4. Icon Pop (The "Access" Symbol) */
@@ -106,7 +103,8 @@
             height: auto;
             filter: drop-shadow(0 15px 35px rgba(59, 130, 246, 0.5));
             margin-bottom: 24px;
-            transform: scale(0.5); /* Initial scale for GSAP pop */
+            transform: scale(0.5);
+            /* Initial scale for GSAP pop */
         }
 
         .portal-text {
@@ -117,7 +115,8 @@
             color: #fff;
             text-transform: uppercase;
             text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
-            opacity: 0; /* Initial opacity for GSAP fade in */
+            opacity: 0;
+            /* Initial opacity for GSAP fade in */
         }
 
         body {
@@ -152,7 +151,7 @@
             content: '';
             position: fixed;
             inset: 0;
-            background: 
+            background:
                 radial-gradient(ellipse at 20% 80%, rgba(234, 88, 12, 0.15) 0%, transparent 50%),
                 radial-gradient(ellipse at 80% 20%, rgba(168, 85, 247, 0.2) 0%, transparent 50%),
                 radial-gradient(circle at 50% 50%, rgba(15, 23, 42, 0.8) 0%, #000000 100%);
@@ -171,7 +170,7 @@
             opacity: 0.8;
         }
 
-        .container {
+        .login-container {
             background: rgba(20, 20, 30, 0.25);
             backdrop-filter: blur(30px) saturate(150%);
             -webkit-backdrop-filter: blur(30px) saturate(150%);
@@ -179,7 +178,7 @@
             border-radius: 24px;
             padding: 40px;
             max-width: 420px;
-            width: 90%;
+            width: 95%;
             box-shadow:
                 0 8px 32px 0 rgba(0, 0, 0, 0.5),
                 inset 0 0 0 1px rgba(255, 255, 255, 0.08),
@@ -188,7 +187,7 @@
             overflow: hidden;
         }
 
-        .container::before {
+        .login-container::before {
             content: '';
             position: absolute;
             top: 0;
@@ -275,7 +274,8 @@
             transform: translateY(-50%);
             background: none;
             border: none;
-            color: #94a3b8; /* Matched to text-secondary */
+            color: #94a3b8;
+            /* Matched to text-secondary */
             cursor: pointer;
             padding: 8px;
             transition: all 0.2s ease;
@@ -283,7 +283,8 @@
         }
 
         .password-toggle:hover {
-            color: #a855f7; /* Matched to purple accent */
+            color: #a855f7;
+            /* Matched to purple accent */
             filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.4));
         }
 
@@ -308,7 +309,7 @@
 
         .submit-btn:hover {
             transform: scale(0.98);
-            box-shadow: 
+            box-shadow:
                 0 4px 10px rgba(234, 88, 12, 0.3),
                 0 0 15px rgba(168, 85, 247, 0.3);
             border-color: rgba(255, 255, 255, 0.2);
@@ -337,8 +338,15 @@
         }
 
         @keyframes slideIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .security-notice {
@@ -396,7 +404,7 @@
         }
 
         /* --- Logo Fix --- */
-        img[src*="innerorbit-logo"], 
+        img[src*="innerorbit-logo"],
         .logo-img {
             /* Keep Original Colors (No Invert) */
             filter: none;
@@ -405,77 +413,75 @@
             /* 3D Depth & Pop Effect */
             /* 1. Dark shadow for depth */
             /* 2. Slight white glow to separate from dark bg */
-            filter: drop-shadow(0 10px 20px rgba(0,0,0,0.6)) drop-shadow(0 0 15px rgba(255,255,255,0.15));
-            
+            filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 15px rgba(255, 255, 255, 0.15));
+
             /* 3D Transform */
             transform: perspective(500px) translateZ(0);
-            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* Bouncy pop */
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            /* Bouncy pop */
         }
 
-        img[src*="innerorbit-logo"]:hover, 
+        img[src*="innerorbit-logo"]:hover,
         .logo-img:hover {
             transform: perspective(500px) translateZ(30px) scale(1.1);
         }
 
 
         @media (max-width: 480px) {
-            .container {
+            .login-container {
                 padding: 24px 20px;
                 margin: 16px;
             }
         }
     </style>
 </head>
+
 <body>
     <div id="login-view">
-        <div class="container">
+        <div class="login-container">
             <div class="header">
-            <h1>InnerOrbit Portal</h1>
-            <p>Access your secure download portal. Enter your credentials to continue.</p>
+                <h1>InnerOrbit Portal</h1>
+                <p>Access your secure download portal. Enter your credentials to continue.</p>
+            </div>
+
+            <form class="password-form" id="passwordForm">
+                <div class="error-message" id="errorMessage">
+                    Access denied. Please check your credentials and try again.
+                </div>
+
+                <div class="input-group">
+                    <label for="password">Access Password</label>
+                    <div class="input-wrapper">
+                        <input type="password" id="password" placeholder="Enter current year" autocomplete="off"
+                            required enterkeyhint="go" autofocus>
+                        <button type="button" class="password-toggle" id="passwordToggle"
+                            aria-label="Toggle password visibility">
+                            <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                                <circle cx="12" cy="12" r="3"></circle>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    Access Portal
+                </button>
+
+                <div class="security-notice">
+                    <div class="icon">⚠️</div>
+                    <div class="text">This portal is password protected. Only authorized users can access downloads.
+                    </div>
+                </div>
+            </form>
         </div>
 
-        <form class="password-form" id="passwordForm">
-            <div class="error-message" id="errorMessage">
-                Access denied. Please check your credentials and try again.
-            </div>
-
-            <div class="input-group">
-                <label for="password">Access Password</label>
-                <div class="input-wrapper">
-                    <input
-                        type="password"
-                        id="password"
-                        placeholder="Enter current year"
-                        autocomplete="off"
-                        required
-                        enterkeyhint="go"
-                        autofocus
-                    >
-                    <button type="button" class="password-toggle" id="passwordToggle" aria-label="Toggle password visibility">
-                        <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                            <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                    </button>
-                </div>
-            </div>
-
-            <button type="submit" class="submit-btn" id="submitBtn">
-                Access Portal
-            </button>
-
-            <div class="security-notice">
-                <div class="icon">⚠️</div>
-                <div class="text">This portal is password protected. Only authorized users can access downloads.</div>
-            </div>
-        </form>
-    </div>
-
-    <div class="page-footer">
-        &copy; 2026 InnerOrbit. All rights reserved.<br>
-        <a href="privacy-policy.html">Privacy Policy</a> | 
-        <a href="terms-of-service.html">Terms of Service</a>
-    </div>
+        <div class="page-footer">
+            &copy; 2026 InnerOrbit. All rights reserved.<br>
+            <a href="privacy-policy.html">Privacy Policy</a> |
+            <a href="terms-of-service.html">Terms of Service</a>
+        </div>
     </div> <!-- End login-view -->
 
     <div id="portal-view" style="display: none; opacity: 0; pointer-events: none;">
@@ -483,22 +489,33 @@
         <div id="angular-docs-root" ng-controller="DocsController"></div>
 
         <!-- Documentation Link Modal -->
-        <div id="docsLinkModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); z-index:999; justify-content:center; align-items:center;">
-            <div style="background:#1e293b; padding:2rem; border-radius:16px; max-width:400px; text-align:center; border:1px solid rgba(168,85,247,0.3);">
+        <div id="docsLinkModal"
+            style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.95); z-index:999; justify-content:center; align-items:center;">
+            <div
+                style="background:#1e293b; padding:2rem; border-radius:16px; max-width:400px; text-align:center; border:1px solid rgba(168,85,247,0.3);">
                 <h2 style="color:#f1f5f9; margin-bottom:1rem;">Documentation</h2>
-                <p style="color:#cbd5e1; margin-bottom:2rem;">Access our comprehensive documentation covering features, installation, security, and more.</p>
-                <a href="docs.html" style="display:inline-block; padding:0.75rem 1.5rem; background:linear-gradient(135deg,#06b6d4,#a855f7); color:white; text-decoration:none; border-radius:8px; font-weight:600; margin-right:0.5rem;">View Docs</a>
-                <button id="closeDocsModal" style="padding:0.75rem 1.5rem; background:rgba(168,85,247,0.2); color:#06b6d4; border:1px solid rgba(168,85,247,0.4); border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
+                <p style="color:#cbd5e1; margin-bottom:2rem;">Access our comprehensive documentation covering features,
+                    installation, security, and more.</p>
+                <a href="docs.html"
+                    style="display:inline-block; padding:0.75rem 1.5rem; background:linear-gradient(135deg,#06b6d4,#a855f7); color:white; text-decoration:none; border-radius:8px; font-weight:600; margin-right:0.5rem;">View
+                    Docs</a>
+                <button id="closeDocsModal"
+                    style="padding:0.75rem 1.5rem; background:rgba(168,85,247,0.2); color:#06b6d4; border:1px solid rgba(168,85,247,0.4); border-radius:8px; cursor:pointer; font-weight:600;">Close</button>
             </div>
         </div>
 
         <!-- Custom Notification Modal -->
-        <div id="customModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(2, 6, 23, 0.8); backdrop-filter: blur(8px); z-index:10000; justify-content:center; align-items:center;">
-            <div style="background:rgba(30, 41, 59, 0.9); padding:2.5rem; border-radius:24px; max-width:420px; width:90%; text-align:center; border:1px solid rgba(34, 211, 238, 0.2); box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
+        <div id="customModal"
+            style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(2, 6, 23, 0.8); backdrop-filter: blur(8px); z-index:10000; justify-content:center; align-items:center;">
+            <div
+                style="background:rgba(30, 41, 59, 0.9); padding:2.5rem; border-radius:24px; max-width:420px; width:90%; text-align:center; border:1px solid rgba(34, 211, 238, 0.2); box-shadow: 0 20px 50px rgba(0,0,0,0.5);">
                 <div id="customModalIcon" style="font-size: 3rem; margin-bottom: 1rem;">✨</div>
                 <h2 id="customModalTitle" style="color:#f1f5f9; margin-bottom:1rem; font-weight:700;">Notification</h2>
-                <p id="customModalMessage" style="color:#94a3b8; margin-bottom:2rem; line-height:1.6;">Message goes here.</p>
-                <button id="closeCustomModal" style="padding:12px 32px; background:linear-gradient(135deg, #06b6d4, #3b82f6); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:600; font-size:1rem; transition: transform 0.2s;">Got it</button>
+                <p id="customModalMessage" style="color:#94a3b8; margin-bottom:2rem; line-height:1.6;">Message goes
+                    here.</p>
+                <button id="closeCustomModal"
+                    style="padding:12px 32px; background:linear-gradient(135deg, #06b6d4, #3b82f6); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:600; font-size:1rem; transition: transform 0.2s;">Got
+                    it</button>
             </div>
         </div>
     </div>
@@ -514,7 +531,7 @@
         if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.getRegistrations().then(registrations => {
-                    for(let registration of registrations) {
+                    for (let registration of registrations) {
                         registration.unregister();
                     }
                 });
@@ -552,7 +569,7 @@
                 e.preventDefault();
                 const type = passwordInput.type === 'password' ? 'text' : 'password';
                 passwordInput.type = type;
-                
+
                 /* Toggle Premium SVG Icon */
                 if (type === 'text') {
                     /* Eye-off (Slashing eye) */
@@ -607,12 +624,12 @@
         /* Handle form submission */
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             if (checkLockout()) return;
 
             const enteredPassword = passwordInput.value.trim();
             const passwordHash = await sha256(enteredPassword);
-            
+
             /* Show loading state */
             const originalBtnText = form.querySelector('.submit-btn').textContent;
             form.querySelector('.submit-btn').textContent = 'Verifying...';
@@ -625,7 +642,7 @@
 
                 if (docSnap.exists && docSnap.data().active) {
                     /* SUCCESS: Run Transition Animation */
-                    
+
                     /* 1. Store session */
                     sessionStorage.setItem('portalAccess', 'granted');
                     document.body.classList.add('authenticated');
@@ -657,7 +674,7 @@
                         duration: 1.2,
                         ease: "back.out(1.7)"
                     }, "-=0.4");
-                    
+
                     tl.to(portalText, {
                         opacity: 1,
                         y: -10,
@@ -670,49 +687,77 @@
 
                     /* Step 4: TRAVEL! Smoothly move logo to top-left */
                     tl.to(portalText, { opacity: 0, duration: 0.4 });
-                    
-                    /* Calculate target left offset to match main-portal container */
-                    const winWidth = window.innerWidth;
-                    const containerWidth = Math.min(winWidth, 1200);
-                    let targetLeft = (winWidth - containerWidth) / 2 + 20;
-                    if (winWidth <= 480) targetLeft = 16;
 
-                    /* Make portal-view display block so rendering calculates correctly */
-                    tl.call(() => {
+                    /* 2. DEFINE REVEAL LOGIC */
+                    let revealStarted = false;
+                    const initiateReveal = () => {
+                        if (revealStarted) return;
+                        revealStarted = true;
+
+                        /* Calculate Pixel-Perfect Target Position */
+                        const targetEl = document.getElementById('nav-logo-landing-pad');
+                        const targetRect = targetEl.getBoundingClientRect();
+                        const iconRect = portalIcon.getBoundingClientRect();
+
+                        const deltaX = targetRect.left - (window.innerWidth / 2) + (targetRect.width / 2);
+                        const deltaY = targetRect.top - (window.innerHeight / 2) + (targetRect.height / 2);
+
+                        /* Make portal-view display block for layout calculations */
                         portalView.style.display = 'block';
-                        void portalView.offsetWidth; // force reflow
-                    }, null, "-=0.2");
+                        void portalView.offsetWidth;
 
-                    /* Move Logo */
-                    tl.to(portalIcon, {
-                        x: -(winWidth / 2) + targetLeft + 22,
-                        y: -(window.innerHeight / 2) + 20 + 22,
-                        width: 44,
-                        height: 44,
-                        filter: 'drop-shadow(0 8px 12px rgba(0,0,0,0.6))',
-                        duration: 1.2,
-                        ease: "power4.inOut"
-                    }, "-=0.2");
+                        /* TRAVEL & IMPACT TIMELINE */
+                        const travelTl = gsap.timeline();
 
-                    /* Fade IN portal view as the logo is traveling! */
-                    tl.to(portalView, {
-                        opacity: 1,
-                        pointerEvents: 'auto',
-                        duration: 0.8
-                    }, "-=0.8");
-                    
-                    /* Fade OUT login view completely */
-                    tl.to(loginView, {
-                        opacity: 0,
-                        duration: 0.8
-                    }, "-=1.0");
+                        // Travel to Navbar
+                        travelTl.to(portalIcon, {
+                            x: deltaX,
+                            y: deltaY,
+                            width: 32,
+                            height: 32,
+                            duration: 1.4,
+                            ease: "expo.inOut"
+                        });
 
-                    /* Final Cleanup */
-                    tl.call(() => {
-                        loginView.style.display = 'none';
-                        iconContainer.style.display = 'none'; // Navbar logo takes over
-                        if (window.ScrollTrigger) window.ScrollTrigger.refresh();
-                    });
+                        // The Impact Moment: Swap Logos
+                        travelTl.call(() => {
+                            targetEl.style.opacity = 1;
+                            portalIcon.style.opacity = 0;
+                        }, null, "-=0.1");
+
+                        // Reveal Content Ripple
+                        travelTl.to(portalView, {
+                            opacity: 1,
+                            scale: 1,
+                            filter: 'blur(0px)',
+                            pointerEvents: 'auto',
+                            duration: 1.0,
+                            ease: "power2.out"
+                        }, "-=0.8");
+
+                        // Fade out login completely
+                        travelTl.to(loginView, {
+                            opacity: 0,
+                            filter: 'blur(20px)',
+                            duration: 0.8
+                        }, "-=1.4");
+
+                        // Final Cleanup
+                        travelTl.call(() => {
+                            loginView.style.display = 'none';
+                            iconContainer.style.display = 'none';
+                            if (window.ScrollTrigger) window.ScrollTrigger.refresh();
+                        });
+                    };
+
+                    /* TRIGGER TRAVEL when React is Ready */
+                    if (window.PORTAL_READY) {
+                        initiateReveal();
+                    } else {
+                        window.addEventListener('portal-ready', initiateReveal, { once: true });
+                        // Safety Fallback (Reduced to 3s)
+                        setTimeout(initiateReveal, 3000);
+                    }
 
                 } else {
                     /* FAILURE */
@@ -725,18 +770,18 @@
         });
 
         function handleLoginFailure(isSystemError = false) {
-            errorMessage.textContent = isSystemError 
-                ? 'System error. Please try again later.' 
+            errorMessage.textContent = isSystemError
+                ? 'System error. Please try again later.'
                 : 'Access denied. Please check your credentials.';
             errorMessage.classList.add('show');
             form.querySelector('.submit-btn').textContent = 'Access Portal'; /* Reset button text */
             form.querySelector('.submit-btn').disabled = false;
-            
+
             /* Record failure */
             let failures = parseInt(localStorage.getItem('failedAttempts') || '0');
             failures++;
             localStorage.setItem('failedAttempts', failures);
-            
+
             if (failures >= MAX_ATTEMPTS) {
                 localStorage.setItem('lockoutTimestamp', Date.now());
                 checkLockout();
@@ -748,33 +793,51 @@
             const access = sessionStorage.getItem('portalAccess');
 
             if (access === 'granted') {
-                /* Already authenticated, show portal immediately */
-                document.getElementById('login-view').style.display = 'none';
-                document.body.classList.add('authenticated');
-                
-                const portalView = document.getElementById('portal-view');
-                portalView.style.display = 'block';
-                portalView.style.opacity = '1';
-                portalView.style.pointerEvents = 'auto';
-                
-                document.getElementById('portalIconContainer').style.display = 'none';
-                if (window.ScrollTrigger) window.ScrollTrigger.refresh();
+                /* Use a flag to ensure reveal only fires ONCE, race-condition safe */
+                let portalRevealed = false;
+
+                function revealPortal() {
+                    if (portalRevealed) return; // Already ran - prevent double fire
+                    portalRevealed = true;
+
+                    document.getElementById('login-view').style.display = 'none';
+                    document.body.classList.add('authenticated');
+
+                    const portalView = document.getElementById('portal-view');
+                    portalView.style.display = 'block';
+                    
+                    // Reveal the navbar logo immediately on reload
+                    const landingPad = document.getElementById('nav-logo-landing-pad');
+                    if (landingPad) landingPad.style.opacity = 1;
+
+                    // Gracious Fade-In Entrance for Reloads
+                    gsap.fromTo(portalView,
+                        { opacity: 0, y: 24, filter: 'blur(12px)' },
+                        { opacity: 1, y: 0, filter: 'blur(0px)', duration: 1.0, ease: 'power3.out' }
+                    );
+
+                    document.getElementById('portalIconContainer').style.display = 'none';
+                    if (window.ScrollTrigger) window.ScrollTrigger.refresh();
+                }
+
+                /* Listen for React signal or check flag */
+                if (window.PORTAL_READY) {
+                    revealPortal();
+                } else {
+                    window.addEventListener('portal-ready', revealPortal, { once: true });
+                    /* Hard fallback: if React takes > 3s, reveal anyway */
+                    setTimeout(revealPortal, 3000);
+                }
             }
         });
     </script>
-    <!-- Authentication Logic -->
-    <script src="js/authentication.js"></script>
-    <!-- Angular Docs Logic -->
-    <script src="js/docs.js"></script>
-    <!-- Network Monitor (Offline Support) -->
-    <script src="js/network-monitor.js">    </script>
     <script type="text/babel" src="js/script.js" defer></script>
     <script>
         // Docs modal functionality
         window.addEventListener('load', () => {
             const docsModal = document.getElementById('docsLinkModal');
             const closeDocsBtn = document.getElementById('closeDocsModal');
-            
+
             if (closeDocsBtn) {
                 closeDocsBtn.addEventListener('click', () => {
                     docsModal.style.display = 'none';
@@ -786,6 +849,7 @@
                 window.location.href = 'docs.html';
             };
         });
-    </script>    
+    </script>
 </body>
+
 </html>

@@ -266,7 +266,16 @@ export const SecurityDetailView = ({
   handleToggleBiometrics,
   biometricsSupported,
   screenshotsBlocked,
-  handleToggleScreenshots
+  handleToggleScreenshots,
+  hardwareLockEnabled,
+  hardwareSupported,
+  handleToggleHardwareLock,
+  autoRecoveryEnabled,
+  handleToggleAutoRecovery,
+  backgroundSyncEnabled,
+  handleToggleBackgroundSync,
+  keyBackupEnabled,
+  handleToggleKeyBackup
 }) => {
   const [isIdCopied, setIsIdCopied] = useState(false);
   const [showPin, setShowPin] = useState(false);
@@ -287,8 +296,9 @@ export const SecurityDetailView = ({
     <DetailWrapper THEME={THEME} isInline={isInline} title="Account Security" subtitle="Manage your access credentials and codes.">
       <View style={{ gap: isInline ? 8 : (isMobile ? 16 : 24) }}>
 
-        {/* SECTION 1: ACCOUNT ACCESS */}
+        {/* SECTION 1: SECURITY CORE */}
         <View style={{ gap: isInline ? 8 : (isMobile ? 12 : 16) }}>
+          <Text style={{ color: THEME.primary, fontSize: 11, fontWeight: '800', letterSpacing: 2, marginLeft: 8, marginBottom: 4 }}>SECURITY CORE</Text>
 
 
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: isInline ? 8 : (isMobile ? 12 : 16) }}>
@@ -397,10 +407,122 @@ export const SecurityDetailView = ({
                 <Feather name="arrow-right" size={16} color={THEME.text} />
               </View>
             </Pressable>
+
+            {/* Card 5: Hardware Security (Level 5) */}
+            <View
+              style={{
+                width: '100%',
+                backgroundColor: (isInline) ? 'transparent' : THEME.surface,
+                borderRadius: isInline ? 0 : (isMobile ? 16 : 24),
+                padding: isInline ? 8 : (isMobile ? 16 : 32),
+                borderWidth: 0,
+                flexDirection: 'row', alignItems: 'center'
+              }}
+            >
+              <View style={{ width: isInline ? 32 : 48, height: isInline ? 32 : 48, borderRadius: isInline ? 8 : 12, backgroundColor: `${THEME.primary}1A`, justifyContent: 'center', alignItems: 'center', marginRight: isInline ? 8 : 24 }}>
+                <Feather name="shield" size={isInline ? 16 : 24} color={THEME.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Text style={{ color: THEME.text, fontSize: isInline ? 15 : 18, fontWeight: '700', marginBottom: 4 }}>Enable Hardware Security</Text>
+                  <View style={{ backgroundColor: `${THEME.primary}20`, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginLeft: 8 }}>
+                    <Text style={{ color: THEME.primary, fontSize: 10, fontWeight: '900' }}>LEVEL 5</Text>
+                  </View>
+                </View>
+                <Text style={{ color: THEME.textSecondary, fontSize: isInline ? 11 : 14 }}>Bind encryption keys to this device's {isWeb ? 'TPM' : 'Secure Hardware'}/Biometrics.</Text>
+              </View>
+              <Switch
+                value={hardwareLockEnabled}
+                onValueChange={(val) => handleToggleHardwareLock(val, myUserId, showSuccess, (msg) => setAlertConfig({ visible: true, title: 'Hardware Error', message: msg, type: 'error' }))}
+                trackColor={{ false: THEME.border, true: THEME.primary }}
+                thumbColor={isIOS ? '#fff' : (hardwareLockEnabled ? THEME.primary : '#f4f3f4')}
+                disabled={!hardwareSupported && isWeb}
+                style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+              />
+            </View>
           </View>
         </View>
 
+        {/* SECTION 2: ADVANCED SECURITY */}
+        <View style={{ marginTop: isInline ? 8 : 16, gap: isInline ? 8 : 12 }}>
+          <Text style={{ color: THEME.primary, fontSize: 11, fontWeight: '800', letterSpacing: 2, marginLeft: 8, marginBottom: 4 }}>ADVANCED</Text>
+          
+          <View style={{
+            width: '100%',
+            backgroundColor: (isInline) ? 'transparent' : THEME.surface,
+            borderRadius: isInline ? 0 : (isMobile ? 16 : 24),
+            padding: isInline ? 8 : (isMobile ? 16 : 32),
+            borderWidth: 0,
+            flexDirection: 'row', alignItems: 'center'
+          }}>
+            <View style={{ width: isInline ? 32 : 48, height: isInline ? 32 : 48, borderRadius: isInline ? 8 : 12, backgroundColor: `${THEME.info}1A`, justifyContent: 'center', alignItems: 'center', marginRight: isInline ? 8 : 24 }}>
+              <Feather name="refresh-cw" size={isInline ? 16 : 24} color={THEME.info} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: THEME.text, fontSize: 15, fontWeight: '700', marginBottom: 4 }}>Cross-Device Recovery</Text>
+              <Text style={{ color: THEME.textSecondary, fontSize: 11, lineHeight: 14 }}>Backup keys using PIN for new devices.</Text>
+            </View>
+            <Switch
+              value={keyBackupEnabled}
+              onValueChange={handleToggleKeyBackup}
+              trackColor={{ false: THEME.border, true: THEME.primary }}
+              thumbColor="#fff"
+              style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+            />
+          </View>
 
+          {keyBackupEnabled && (
+            <>
+              <View style={{
+                width: '100%',
+                backgroundColor: (isInline) ? 'transparent' : THEME.surface,
+                borderRadius: isInline ? 0 : (isMobile ? 16 : 24),
+                padding: isInline ? 8 : (isMobile ? 16 : 32),
+                borderWidth: 0,
+                flexDirection: 'row', alignItems: 'center'
+              }}>
+                <View style={{ width: isInline ? 32 : 48, height: isInline ? 32 : 48, borderRadius: isInline ? 8 : 12, backgroundColor: `${THEME.primary}1A`, justifyContent: 'center', alignItems: 'center', marginRight: isInline ? 8 : 24 }}>
+                  <Feather name="unlock" size={isInline ? 16 : 24} color={THEME.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: THEME.text, fontSize: 15, fontWeight: '700', marginBottom: 4 }}>Auto Recover</Text>
+                  <Text style={{ color: THEME.textSecondary, fontSize: 11, lineHeight: 14 }}>Silently unlock chat history with cached PIN.</Text>
+                </View>
+                <Switch
+                  value={autoRecoveryEnabled}
+                  onValueChange={handleToggleAutoRecovery}
+                  trackColor={{ false: THEME.border, true: THEME.primary }}
+                  thumbColor="#fff"
+                  style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+                />
+              </View>
+
+              <View style={{
+                width: '100%',
+                backgroundColor: (isInline) ? 'transparent' : THEME.surface,
+                borderRadius: isInline ? 0 : (isMobile ? 16 : 24),
+                padding: isInline ? 8 : (isMobile ? 16 : 32),
+                borderWidth: 0,
+                flexDirection: 'row', alignItems: 'center'
+              }}>
+                <View style={{ width: isInline ? 32 : 48, height: isInline ? 32 : 48, borderRadius: isInline ? 8 : 12, backgroundColor: `${THEME.success}1A`, justifyContent: 'center', alignItems: 'center', marginRight: isInline ? 8 : 24 }}>
+                  <Feather name="activity" size={isInline ? 16 : 24} color={THEME.success} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: THEME.text, fontSize: 15, fontWeight: '700', marginBottom: 4 }}>Background Default</Text>
+                  <Text style={{ color: THEME.textSecondary, fontSize: 11, lineHeight: 14 }}>Sync keys and messages while in background.</Text>
+                </View>
+                <Switch
+                  value={backgroundSyncEnabled}
+                  onValueChange={handleToggleBackgroundSync}
+                  trackColor={{ false: THEME.border, true: THEME.primary }}
+                  thumbColor="#fff"
+                  style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+                />
+              </View>
+            </>
+          )}
+        </View>
 
       </View>
     </DetailWrapper >

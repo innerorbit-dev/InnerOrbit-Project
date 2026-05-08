@@ -18,6 +18,62 @@ jest.mock('expo-secure-store', () => ({
     deleteItemAsync: jest.fn(),
 }));
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+    getItem: jest.fn(() => Promise.resolve(null)),
+    setItem: jest.fn(() => Promise.resolve()),
+    removeItem: jest.fn(() => Promise.resolve()),
+}));
+
+jest.mock('../../lib/crypto-wrapper', () => {
+    const crypto = require('crypto');
+    return {
+        ml_kem768: {
+            keygen: jest.fn(() => ({ publicKey: new Uint8Array(1184), secretKey: new Uint8Array(2400) })),
+            encapsulate: jest.fn((pk) => ({ cipherText: new Uint8Array(1088), sharedSecret: new Uint8Array(32).fill(0x42) })),
+            decapsulate: jest.fn((ct, sk) => new Uint8Array(32).fill(0x42))
+        },
+        createHash: (alg) => crypto.createHash(alg),
+        randomBytes: (n) => crypto.randomBytes(n),
+        createHmac: (alg, key) => crypto.createHmac(alg, key),
+        generateKeyPairSync: () => crypto.generateKeyPairSync('x25519'),
+        diffieHellman: () => Buffer.alloc(32, 0x42),
+        argon2Sync: (alg, options) => {
+            const hash = crypto.createHash('sha256')
+                .update(options.message)
+                .update(options.nonce)
+                .digest();
+            return hash.subarray(0, options.tagLength || 32);
+        },
+        createCipheriv: (alg, key, iv) => {
+            const cipher = crypto.createCipheriv(alg, key, iv);
+            return {
+                update: (data, ie, oe) => cipher.update(data, ie, oe),
+                final: (oe) => cipher.final(oe),
+                getAuthTag: () => cipher.getAuthTag(),
+                setAuthTag: (t) => cipher.setAuthTag(t)
+            };
+        },
+        createDecipheriv: (alg, key, iv) => {
+            const decipher = crypto.createDecipheriv(alg, key, iv);
+            return {
+                update: (data, ie, oe) => decipher.update(data, ie, oe),
+                final: (oe) => decipher.final(oe),
+                setAuthTag: (t) => decipher.setAuthTag(t)
+            };
+        },
+        MlKem: class {
+            constructor(type) {}
+            generateKeyPairSync() {}
+            getPublicKey() { return new Uint8Array(1184); }
+            getPrivateKey() { return new Uint8Array(2400); }
+            setPublicKey() {}
+            setPrivateKey() {}
+            encapsulateSync() { return { ciphertext: new Uint8Array(1088), sharedKey: new Uint8Array(32).fill(0x42) }; }
+            decapsulateSync() { return new Uint8Array(32).fill(0x42); }
+        }
+    };
+});
+
 import { encrypt, decrypt } from '../../lib/encryption';
 
 // Mock Firebase
@@ -80,8 +136,8 @@ describe('Integration: Chat Flow', () => {
             const encrypted1 = encrypt(message, testKey);
             const encrypted2 = encrypt(message, testKey);
 
-            // Different ciphertext due to IV randomization
-            expect(encrypted1).not.toBe(encrypted2);
+            // Protocol v3.5 (SIV) is deterministic for same key/message
+            expect(encrypted1).toBe(encrypted2);
 
             // But both decrypt to same message
             expect(decrypt(encrypted1, testKey)).toBe(message);

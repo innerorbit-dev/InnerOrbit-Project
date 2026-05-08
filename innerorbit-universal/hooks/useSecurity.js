@@ -8,6 +8,7 @@ import { isWeb } from '../utils/platform';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Logger } from '../lib/logger';
+import { WebAuthnService } from '../lib/webauthn-service';
 
 // Safe import for Native Modules
 let ScreenCapture;
@@ -21,19 +22,75 @@ export function useSecurity(settingsStealthExpanded) {
   const [screenshotsBlocked, setScreenshotsBlocked] = useState(false);
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [biometricsSupported, setBiometricsSupported] = useState(false);
+  const [hardwareLockEnabled, setHardwareLockEnabled] = useState(false);
+  const [hardwareSupported, setHardwareSupported] = useState(false);
+  const [autoRecoveryEnabled, setAutoRecoveryEnabled] = useState(true);
+  const [backgroundSyncEnabled, setBackgroundSyncEnabled] = useState(true);
+  const [keyBackupEnabled, setKeyBackupEnabled] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  // Init Biometrics
+  // Init Biometrics and Hardware Security
   useEffect(() => {
     (async () => {
       try {
         const savedBio = await AsyncStorage.getItem('biometricsEnabled');
         if (savedBio === 'true') setBiometricsEnabled(true);
 
+        const savedHardware = await AsyncStorage.getItem('hardwareLockEnabled');
+        if (savedHardware === 'true') setHardwareLockEnabled(true);
+
         const compatible = await LocalAuthentication.hasHardwareAsync();
         setBiometricsSupported(compatible);
-      } catch (e) { }
+
+        // Check WebAuthn support for Level 5 Hardware Binding
+        if (isWeb) {
+          const webauthn = WebAuthnService.getInstance();
+          const hwSupported = await webauthn.isSupported();
+          setHardwareSupported(hwSupported);
+        }
+
+        // Load Firestore-based security settings
+        const { auth } = require('../lib/firebase');
+        if (auth.currentUser) {
+          const { getUserProfile } = await import('../lib/firestore-service');
+          const profile = await getUserProfile(auth.currentUser.uid);
+          if (profile?.settings) {
+            setKeyBackupEnabled(profile.settings.keyBackupEnabled !== false);
+            setAutoRecoveryEnabled(profile.settings.autoRecoveryEnabled !== false);
+            setBackgroundSyncEnabled(profile.settings.backgroundSyncEnabled !== false);
+          }
+        }
+      } catch (e) {
+        Logger.log('Error initializing security state:', e);
+      }
     })();
   }, []);
+
+  const handleToggleHardwareLock = async (val, userId, showSuccess, showError) => {
+    if (val) {
+      if (!isWeb) {
+        if (showError) showError("Hardware Security (Level 5) is currently Web-only. Native support coming soon.");
+        return;
+      }
+
+      try {
+        const webauthn = WebAuthnService.getInstance();
+        const result = await webauthn.registerHardwareLock(userId || 'current-user');
+
+        if (result) {
+          setHardwareLockEnabled(true);
+          await AsyncStorage.setItem('hardwareLockEnabled', 'true');
+          if (showSuccess) showSuccess("Elite Level 5 Hardware Binding Activated!");
+        }
+      } catch (error) {
+        if (showError) showError("Hardware registration failed or was cancelled.");
+      }
+    } else {
+      setHardwareLockEnabled(false);
+      await AsyncStorage.setItem('hardwareLockEnabled', 'false');
+      if (showSuccess) showSuccess("Hardware Security Level 5 Disabled.");
+    }
+  };
 
   const handleToggleBiometrics = async (val, showSuccess, showError) => {
     if (val) {
@@ -73,7 +130,54 @@ export function useSecurity(settingsStealthExpanded) {
     if (showSuccess) showSuccess(val ? "Screenshots Blocked" : "Screenshots Allowed");
   };
 
-  // Logic from lines 513-561
+  const handleToggleKeyBackup = async (value) => {
+    try {
+      setLoading(true);
+      const { auth } = require('../lib/firebase');
+      const { updateUserProfile } = await import('../lib/firestore-service');
+      await updateUserProfile(auth.currentUser.uid, {
+        'settings.keyBackupEnabled': value
+      });
+      setKeyBackupEnabled(value);
+    } catch (error) {
+      Logger.error('Error toggling key backup:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleAutoRecovery = async (value) => {
+    try {
+      setLoading(true);
+      const { auth } = require('../lib/firebase');
+      const { updateUserProfile } = await import('../lib/firestore-service');
+      await updateUserProfile(auth.currentUser.uid, {
+        'settings.autoRecoveryEnabled': value
+      });
+      setAutoRecoveryEnabled(value);
+    } catch (error) {
+      Logger.error('Error toggling auto recovery:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleToggleBackgroundSync = async (value) => {
+    try {
+      setLoading(true);
+      const { auth } = require('../lib/firebase');
+      const { updateUserProfile } = await import('../lib/firestore-service');
+      await updateUserProfile(auth.currentUser.uid, {
+        'settings.backgroundSyncEnabled': value
+      });
+      setBackgroundSyncEnabled(value);
+    } catch (error) {
+      Logger.error('Error toggling background sync:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     // Detect if running in Electron (Windows .exe)
     const isElectron = isWeb &&
@@ -129,6 +233,15 @@ export function useSecurity(settingsStealthExpanded) {
     handleToggleScreenshots,
     biometricsEnabled,
     handleToggleBiometrics,
-    biometricsSupported
+    biometricsSupported,
+    hardwareLockEnabled,
+    hardwareSupported,
+    handleToggleHardwareLock,
+    autoRecoveryEnabled,
+    handleToggleAutoRecovery,
+    backgroundSyncEnabled,
+    handleToggleBackgroundSync,
+    keyBackupEnabled,
+    handleToggleKeyBackup
   };
 }

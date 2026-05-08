@@ -39,6 +39,12 @@ contextBridge.exposeInMainWorld('electron', {
     platform: process.platform,
     isElectron: true,
 
+    // Hardware Level Security (TPM/DPAPI)
+    safeStorage: {
+        encrypt: (plaintext) => ipcRenderer.invoke('safe-storage-encrypt', plaintext),
+        decrypt: (ciphertext) => ipcRenderer.invoke('safe-storage-decrypt', ciphertext)
+    },
+
     // Window controls for frameless mode
     windowControls: {
         minimize: () => ipcRenderer.send('window-minimize'),

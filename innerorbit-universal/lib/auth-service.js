@@ -2,6 +2,7 @@
 import { auth } from "./firebase";
 import { findUserByCredentials } from "./user-id-generator";
 import { updateUserPresence } from "./firestore-service";
+import { publishMyKeysOnLogin } from "./ratchet-key-service";
 import { Logger } from "./logger";
 
 /**
@@ -30,7 +31,13 @@ export async function signInWithPin(userId, pin) {
       Logger.warn("[AuthService] Presence update failed (non-fatal):", presenceError);
     }
 
-    // 3. Return the authenticated profile
+    // 3. Publish DH + v6 public keys to Firestore so partners can initiate ratchet sessions.
+    //    Non-blocking — runs in background so login UX is instant.
+    publishMyKeysOnLogin(userProfile.uid).catch(e =>
+      Logger.warn("[AuthService] Key publish failed (non-fatal):", e?.message)
+    );
+
+    // 4. Return the authenticated profile
     return userProfile;
 
   } catch (error) {

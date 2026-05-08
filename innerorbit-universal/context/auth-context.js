@@ -15,8 +15,12 @@ import SecureStorage from "../lib/secure-storage-service";
 import { AuthProtector, LocalPinProtector } from '../lib/security-utils';
 import { Logger } from '../lib/logger';
 import { DEFAULT_ENCRYPTION_CAPABILITIES } from "../lib/encryption";
+import { publishMyKeysOnLogin } from "../lib/ratchet-key-service";
 
 export const AuthContext = createContext(undefined);
+
+// --- SESSION SECURITY CONFIG ---
+const SESSION_TIMEOUT = isWeb ? (48 * 60 * 60 * 1000) : (7 * 24 * 60 * 60 * 1000);
 
 // --- JS SESSION CACHE (Survives Remounts, resets on full App Closure) ---
 let lastDecoyState = !isWeb;
@@ -26,14 +30,17 @@ let sessionHasInitialized = false; // Persistent flag for the whole JS session
 let gisClientInitialized = false; // track GIS initialization
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(lastUserSession);
+  // ─── Instant Session Recovery ────────────────────────────────────────────────
+  // We use a static variable outside the component to survive remounts during navigation.
+  const [user, setUser] = useState(lastUserSession || null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [autoLoginLoading, setAutoLoginLoading] = useState(true);
+  const [authInitialized, setAuthInitialized] = useState(false);
 
   // Use session cache as initial values
   const [isDecoyModeInternal, setIsDecoyModeInternal] = useState(lastDecoyState);
   const [isUnlocking, setIsUnlocking] = useState(lastUnlockingState);
   const [isBiometricLocked, setIsBiometricLocked] = useState(false);
+  const [sessionPin, setSessionPin] = useState(null); // In-memory only
 
   // Detect if this is the absolute first mount of THIS instance of the provider
   // AND if it's the first mount of the session overall.
@@ -101,6 +108,9 @@ export function AuthProvider({ children }) {
 
       // Track manual login
       await SecureStorage.incrementManualLoginCount();
+
+      // Track session start for hard timeout (Web: 48h, Mobile: 7d)
+      await AsyncStorage.setItem(`session_start_${user.uid}`, Date.now().toString());
 
       return user;
     } catch (err) {
@@ -174,6 +184,29 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       try {
         if (currentUser) {
+          // 🛡️ SECURITY: Check for Hard Session Expiry
+          const sessionStartTime = await AsyncStorage.getItem(`session_start_${currentUser.uid}`);
+          Logger.log(`[Auth] 🔍 Session Check: uid=${currentUser.uid.substring(0, 5)}, start=${sessionStartTime}`);
+          
+          if (sessionStartTime) {
+            const age = Date.now() - parseInt(sessionStartTime);
+            const hoursLeft = (SESSION_TIMEOUT - age) / 3600000;
+            Logger.log(`[Auth] ⏳ Session Age: ${Math.round(age / 3600000)}h, Timeout: ${SESSION_TIMEOUT / 3600000}h, Remaining: ${hoursLeft.toFixed(2)}h`);
+            
+            if (age > SESSION_TIMEOUT) {
+              Logger.warn(`[Auth] 🚨 Hard Expiry Reached. Triggering Logout.`);
+              await logout();
+              return;
+            }
+          } else {
+            // First time seeing this user without a timestamp? Set it now.
+            Logger.log("[Auth] ✨ No session timestamp found. Initializing now.");
+            await AsyncStorage.setItem(`session_start_${currentUser.uid}`, Date.now().toString());
+          }
+
+          // 2. 🔐 SECURITY FIX: Publish X25519 and ML-KEM keys (Enables v4/v6 Ratchet)
+          await publishMyKeysOnLogin(currentUser.uid);
+
           // If a user is found, we simply set them. 
           setUser(currentUser);
           try {
@@ -186,9 +219,13 @@ export function AuthProvider({ children }) {
             if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
 
             Logger.log("[Auth] ❤️ Starting Session Heartbeat...");
-            presenceIntervalRef.current = setInterval(() => {
-              // Silenced repetitive log
-              // Logger.log("[Auth] ❤️ Sending Presence Heartbeat...");
+            presenceIntervalRef.current = setInterval(async () => {
+              // Periodically check if session expired while app is open
+              const sessionStartTime = await AsyncStorage.getItem(`session_start_${currentUser.uid}`);
+              if (sessionStartTime && (Date.now() - parseInt(sessionStartTime) > SESSION_TIMEOUT)) {
+                await logout();
+                return;
+              }
               updateUserPresence(currentUser.uid, true, true).catch(() => { });
             }, 60000);
 
@@ -217,18 +254,21 @@ export function AuthProvider({ children }) {
           Logger.log('[Auth] ℹ️ No active session found');
           setUser(null);
           lastUserSession = null;
+          
+          // Clear the cache immediately on true sign-out
+          AsyncStorage.removeItem("userProfileCache").catch(() => { });
 
           if (!isWeb) {
             await AsyncStorage.removeItem("has_active_session").catch(() => { });
           }
         }
       } catch (err) {
-        Logger.error("Auth state change error:", err);
+        Logger.error("🚨 [Auth] CRITICAL: Auth state change failed. Forcing logout to prevent state corruption.", err);
+        if (err?.message) Logger.error(`[Auth] Error Reason: ${err.message}`);
         setUser(null);
       } finally {
-        // Only disable loading if SecureStorage is also initialized
-        const isReady = sessionHasInitialized;
-        if (isReady) setAuthLoading(false);
+        setAuthInitialized(true);
+        setAuthLoading(false);
       }
     });
 
@@ -239,7 +279,7 @@ export function AuthProvider({ children }) {
         presenceIntervalRef.current = null;
       }
     };
-  }, [user?.uid]);
+  }, []);
 
   // Use a ref for user to avoid re-mounting AppState listeners unnecessarily
   const userRef = useRef(user);
@@ -270,10 +310,10 @@ export function AuthProvider({ children }) {
         // Heartbeat Resume
         const currentUser = userRef.current;
         if (currentUser?.uid || auth.currentUser?.uid) {
-           import("../lib/firestore-service").then(({ updateUserPresence }) => {
+          import("../lib/firestore-service").then(({ updateUserPresence }) => {
             const uid = auth.currentUser?.uid || currentUser?.uid;
-            updateUserPresence(uid, true, true).catch(() => {});
-            
+            updateUserPresence(uid, true, true).catch(() => { });
+
             if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
             presenceIntervalRef.current = setInterval(() => {
               updateUserPresence(uid, true, true).catch(() => { });
@@ -293,7 +333,7 @@ export function AuthProvider({ children }) {
         if (currentUser?.uid || auth.currentUser?.uid) {
           import("../lib/firestore-service").then(({ updateUserPresence }) => {
             const uid = auth.currentUser?.uid || currentUser?.uid;
-            updateUserPresence(uid, false, true).catch(() => {});
+            updateUserPresence(uid, false, true).catch(() => { });
           });
         }
 
@@ -330,7 +370,7 @@ export function AuthProvider({ children }) {
       if (user?.uid || auth.currentUser?.uid) {
         const { updateUserPresence } = await import("../lib/firestore-service");
         const uid = auth.currentUser?.uid || user?.uid;
-        updateUserPresence(uid, isOnline, true).catch(() => {});
+        updateUserPresence(uid, isOnline, true).catch(() => { });
 
         if (isOnline) {
           if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
@@ -478,6 +518,9 @@ export function AuthProvider({ children }) {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       const profileData = await createUserProfile(result.user);
 
+      // Track session start for hard timeout
+      await AsyncStorage.setItem(`session_start_${result.user.uid}`, Date.now().toString());
+
       // Track that this is a fresh signup for onboarding
       setWelcomeData({
         userId: profileData.userId,
@@ -518,27 +561,24 @@ export function AuthProvider({ children }) {
     try {
       setError(null);
       setIsDecoyMode(false, 'GoogleSignIn');
-      await AsyncStorage.setItem("isAppUnlocked", "true"); // PERMANENT UNLOCK for this session
+      await AsyncStorage.setItem("isAppUnlocked", "true");
 
-      // Security: Ensure no stale credentials
       await SecureStorage.clearAllCredentials();
 
       const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
+      // No prompt:'select_account' — lets returning users re-auth silently without picker.
 
-      // Detect Mobile Web Environment
-      const isMobileWeb = isWeb && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      const isElectron = isWeb && /Electron/i.test(navigator.userAgent);
 
-      if (isMobileWeb) {
-        // Use Redirect Flow for Mobile Web
-        Logger.log("[Auth] 📱 Mobile Web detected -> Using signInWithRedirect");
-        // Save persistence preference to session storage to retrieve after redirect
+      if (isWeb && !isElectron) {
+        // All web browsers (desktop + mobile): redirect in same tab — no popup
+        Logger.log("[Auth] 🌐 Web -> signInWithRedirect (single tab)");
         sessionStorage.setItem('temp_google_auth_persist', String(saveLogin));
         await signInWithRedirect(auth, provider);
-        // Page will reload, handling continues in useEffect -> getRedirectResult
         return;
       } else {
-        // Use Popup Flow for Desktop
+        // Electron: popup (redirect breaks in Electron renderer)
+        Logger.log("[Auth] ⚡ Electron -> signInWithPopup");
         const result = await signInWithPopup(auth, provider);
         return await handleGoogleUser(result.user, saveLogin);
       }
@@ -550,6 +590,7 @@ export function AuthProvider({ children }) {
       throw new Error(errorMessage);
     }
   };
+
 
   /**
    * Initializes Google One Tap (One-tap sign-in) for Web.
@@ -745,6 +786,15 @@ export function AuthProvider({ children }) {
 
         setUser(appUser);
         lastUserSession = appUser; // Cache session for remounts
+        
+        // Cache PIN for background key backups (Cross-Device Recovery)
+        if (isPinLogin && passwordOrPin) {
+          setSessionPin(passwordOrPin);
+        }
+
+        // Track session start for hard timeout
+        await AsyncStorage.setItem(`session_start_${appUser.uid}`, Date.now().toString());
+
         setIsDecoyMode(!!userProfile.isDecoySession, 'PinSignIn');
 
         // Save userId only if persistence is enabled (and not already saved via immediateSave)
@@ -871,6 +921,11 @@ export function AuthProvider({ children }) {
       }
 
       // 2. Local State Cleanup (Critical)
+      const currentUid = user?.uid || auth.currentUser?.uid;
+      if (currentUid) {
+        await AsyncStorage.removeItem(`session_start_${currentUid}`).catch(() => { });
+      }
+      
       setUser(null);
       // Force "Stealth Mode" (Calculator) on mobile so redirect goes to Calculator, not Login
       setIsDecoyMode(!isWeb, 'Logout');
@@ -948,6 +1003,8 @@ export function AuthProvider({ children }) {
       triggerStealthUnlock,
       isBiometricLocked,
       authenticateBiometrics,
+      sessionPin,
+      setSessionPin,
       isUnlocking,
       setIsUnlocking: setIsUnlockingSynced,
       welcomeData,

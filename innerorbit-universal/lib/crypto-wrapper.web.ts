@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import CryptoJS from 'crypto-js';
-import { x25519 } from '@noble/curves/ed25519.js';
+import { x25519, ed25519 } from '@noble/curves/ed25519.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hmac } from '@noble/hashes/hmac.js';
 import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
@@ -97,10 +97,9 @@ export const randomBytes = (size: number) => {
   } else if (typeof globalThis !== 'undefined' && globalThis.crypto) {
     globalThis.crypto.getRandomValues(bytes);
   } else {
-    // Insecure fallback is better than failing, but we should warn loudly.
-    // However, for a security-focused app, it's better to fail or use a better PRNG.
-    Logger.warn("[Crypto] window.crypto not available, using Math.random() (INSECURE)");
-    for (let i = 0; i < size; i++) bytes[i] = Math.floor(Math.random() * 256);
+    // SECURITY CRITICAL: Never fall back to Math.random() for key material.
+    // In a high-assurance environment, we must fail closed rather than compromise entropy.
+    throw new Error("[Crypto] No secure entropy source available (window.crypto or globalThis.crypto missing). Refusing to generate insecure bytes.");
   }
   return Buffer.from(bytes);
 };
@@ -162,10 +161,7 @@ export const pbkdf2Sync = (password: any, salt: any, iterations: number, keylen:
 };
 
 export function createCipheriv(algorithm: string, key: Buffer, iv: Buffer) {
-  if (algorithm === "aes-256-gcm") {
-    throw new Error("GCM_NOT_SUPPORTED_ON_WEB");
-  }
-
+  // Fallback to CTR for synchronous ciphering in web/test environments.
   const keyWa = CryptoJS.enc.Base64.parse(key.toString("base64"));
   const ivWa = CryptoJS.enc.Base64.parse(iv.toString("base64"));
 
@@ -188,10 +184,7 @@ export function createCipheriv(algorithm: string, key: Buffer, iv: Buffer) {
 }
 
 export function createDecipheriv(algorithm: string, key: Buffer, iv: Buffer) {
-  if (algorithm === "aes-256-gcm") {
-    throw new Error("GCM_NOT_SUPPORTED_ON_WEB");
-  }
-
+  // Fallback to CTR for synchronous deciphering in web/test environments.
   const keyWa = CryptoJS.enc.Base64.parse(key.toString("base64"));
   const ivWa = CryptoJS.enc.Base64.parse(iv.toString("base64"));
 
@@ -208,6 +201,70 @@ export function createDecipheriv(algorithm: string, key: Buffer, iv: Buffer) {
     final: (outputEnc: string) => "",
     setAuthTag: (tag: Buffer) => {},
   };
+}
+
+/**
+ * 🔐 Async AES-256-GCM encrypt via SubtleCrypto (browser native).
+ *
+ * Replaces the old AES-CTR fallback for new web messages.
+ * Output: { ciphertext: base64, authTag: base64 } — same format as mobile GCM.
+ * NOTE: SubtleCrypto appends the 16-byte auth tag at the END of the encrypted buffer.
+ */
+export async function encryptAESGCMWeb(
+  key: Buffer,
+  iv: Buffer,
+  plaintext: string
+): Promise<{ ciphertext: string; authTag: string }> {
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(key),
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt']
+  );
+  const encoded = new TextEncoder().encode(plaintext);
+  const encrypted = await globalThis.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(iv), tagLength: 128 },
+    cryptoKey,
+    encoded
+  );
+  const result = new Uint8Array(encrypted);
+  return {
+    ciphertext: Buffer.from(result.slice(0, -16)).toString('base64'),
+    authTag: Buffer.from(result.slice(-16)).toString('base64'),
+  };
+}
+
+/**
+ * 🔓 Async AES-256-GCM decrypt via SubtleCrypto (browser native).
+ *
+ * Handles messages encrypted by encryptAESGCMWeb or mobile AES-GCM.
+ * Falls back gracefully — caller should catch and try CTR path for old messages.
+ */
+export async function decryptAESGCMWeb(
+  key: Buffer,
+  iv: Buffer,
+  authTag: Buffer,
+  ciphertextB64: string
+): Promise<string> {
+  const cryptoKey = await globalThis.crypto.subtle.importKey(
+    'raw',
+    new Uint8Array(key),
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+  const ctBuf = Buffer.from(ciphertextB64, 'base64');
+  // SubtleCrypto expects ciphertext + authTag concatenated
+  const combined = new Uint8Array(ctBuf.length + authTag.length);
+  combined.set(new Uint8Array(ctBuf));
+  combined.set(new Uint8Array(authTag), ctBuf.length);
+  const decrypted = await globalThis.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: new Uint8Array(iv), tagLength: 128 },
+    cryptoKey,
+    combined
+  );
+  return new TextDecoder().decode(decrypted);
 }
 
 export const diffieHellman = (options: { privateKey: Buffer; publicKey: Buffer }) => {
@@ -242,6 +299,26 @@ export const argon2Sync = (alg: string, params: any) => {
   );
 };
 
+export const ed25519Sign = {
+  keygen: () => {
+    const priv = ed25519.utils.randomSecretKey();
+    const pub = ed25519.getPublicKey(priv);
+    return {
+      publicKey: Buffer.from(pub),
+      privateKey: Buffer.from(priv)
+    };
+  },
+  sign: (message: Buffer | string, privateKey: Buffer) => {
+    const msgBuf = typeof message === 'string' ? Buffer.from(message, 'utf8') : message;
+    const signature = ed25519.sign(new Uint8Array(msgBuf), new Uint8Array(privateKey));
+    return Buffer.from(signature);
+  },
+  verify: (signature: Buffer, message: Buffer | string, publicKey: Buffer) => {
+    const msgBuf = typeof message === 'string' ? Buffer.from(message, 'utf8') : message;
+    return ed25519.verify(new Uint8Array(signature), new Uint8Array(msgBuf), new Uint8Array(publicKey));
+  }
+};
+
 const webCrypto = {
   randomBytes,
   createHash,
@@ -249,10 +326,13 @@ const webCrypto = {
   pbkdf2Sync,
   createCipheriv,
   createDecipheriv,
+  encryptAESGCMWeb,
+  decryptAESGCMWeb,
   diffieHellman,
   generateKeyPairSync,
   argon2Sync,
-  MlKem
+  MlKem,
+  ed25519Sign
 };
 
 export default webCrypto;

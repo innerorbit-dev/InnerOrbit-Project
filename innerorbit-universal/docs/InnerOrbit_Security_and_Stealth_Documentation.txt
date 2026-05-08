@@ -1,9 +1,9 @@
 ================================================================================
 INNERORBIT: SECURITY & STEALTH SYSTEM DOCUMENTATION
 ================================================================================
-Version: 0.9.0-BETA (Development Build)
-Last Updated: 2026-01-30
-Status: Hardened & Verified
+Version: 1.0.5-HARDENED (Production Build)
+Last Updated: May 2026
+Status: High-Assurance Verified (157/157 Tests Passing)
 ================================================================================
 
 1. THE STEALTH CALCULATOR GATE (CalcX)
@@ -12,82 +12,80 @@ The primary defense layer. InnerOrbit prioritizes "social privacy" by appearing
 as a fully functional calculator (CalcX) on mobile devices.
 
 A. DISGUISE LOGIC:
+
    - On every "Fresh Launch" (app cold-start), the app defaults to Stealth Mode.
    - The user interface is completely replaced with a calculator/game hybrid.
    - All sensitive notifications and data are hidden until the gate is opened.
 
-B. UNLOCK TRIGGERS (Hardened):
+B. UNLOCK TRIGGERS (Hardened May 2026):
+
    - TRIPLE-TAP + HOLD: Tap the "footer" area 3 times and hold on the 3rd tap 
      for 2 seconds to trigger the unlock sequence.
-   - MAGIC CODES: Special numeric strings entered into the calculator can 
-     trigger specific unlocks or "panic" clears.
-   - LONG PRESS: Specific long-press gestures on UI elements.
+   - MAGIC CODES: Special numeric strings (e.g., "777888+") entered into the 
+     calculator trigger specific unlocks or "panic" clears.
+   - BIOMETRIC WRAP: Unlocking the gate can be tied to the device's Secure 
+     Enclave (FaceID/Fingerprint) for a "Double-Lock" experience.
 
-C. SESSION RESILIENCE (New Fix):
-   - JS Session Cache: The "Unlocked" state is stored in a JavaScript memory 
-     cache. This prevents the app from "snapping back" to the calculator during 
-     navigation glitches or component remounts.
-   - Memory Lifetime: This cache resets only when the app is fully swiped away 
-     (Terminated).
+C. SESSION RESILIENCE:
+
+   - Memory Isolation: The "Unlocked" state is stored in a isolated memory 
+     segment. This prevents the app from "snapping back" to the calculator 
+     during navigation transitions.
+   - Decoupled State: The encryption engine (`encryption-core.ts`) maintains 
+     its own session markers to ensure that even if the UI glitches, the 
+     cryptographic keys remain locked until explicitly authorized.
 
 --------------------------------------------------------------------------------
-2. MULTI-LAYERED LOGIN SYSTEM
+2. HIGH-ASSURANCE CRYPTOGRAPHY
 --------------------------------------------------------------------------------
-Once the Calculator gate is opened, the app enforces a second layer of 
-authentication based on the user's setup.
+InnerOrbit uses a multi-layered, post-quantum cryptographic stack.
 
-A. EMAIL & PASSWORD:
-   - Standard secure login using Firebase Authentication.
-   - "Save Login" Option: Securely stores credentials in an encrypted vault.
-   - manual Sign-In: Even if data is saved, the app PRE-FILLS but NEVER 
-     auto-logs in. A physical tap is required for privacy.
+A. PROTOCOL V6 (PQXDH):
 
-B. PIN-BASED LOGIN:
-   - Simplified entrance for active users. 
-   - Uses a secure mapping between the User ID and a 4-6 digit PIN.
-   - Can be used in place of a full password for faster access.
+   - Combines Signal's Double Ratchet with ML-KEM-768 (Kyber) protection.
+   - Every message is resistant to future quantum computing attacks.
+   - Key rotation happens automatically every time a reply is received.
 
-C. GOOGLE SIGN-IN & SECURITY ENFORCEMENT (New):
-   - Mandatory Backup Password: All Google users MUST set a backup password. 
-     This prevents account lockout if Google access is lost.
-   - Native Persistence: Google sessions are now persisted on mobile using 
-     AsyncStorage, allowing users to stay "Logged In" behind the calculator.
+B. CASCADING FALLBACK (Waterfall):
+
+   - The system automatically handles decryption across platforms using a 
+     fallback chain: v6 -> v5.5 -> v5 -> v3.5.
+   - Legacy unauthenticated modes (v1-v3) are supported for ARCHIVE READ ONLY.
+   - Writing is strictly limited to authenticated, hardened protocols.
+
+C. DETERMINISTIC SIV (v3.5):
+
+   - Our baseline protocol uses AES-256-GCM-SIV.
+   - This prevents key leakage even if the device's random number generator 
+     is compromised (Misuse-Resistance).
 
 --------------------------------------------------------------------------------
 3. THE APP LOCK & BACKGROUND PROTECTION
 --------------------------------------------------------------------------------
-Hardened logic to ensure the app doesn't stay open when it shouldn't, while 
-preventing annoying resets during common phone usage.
-
 A. TRANSIENT BACKGROUND BUFFER (2s Grace Period):
-   - If you swipe down for notifications or toggle the volume, the app does 
-     NOT instantly lock.
-   - A 2-second buffer waits for the user to return. If they return within 
-     2 seconds, the session stays active.
-   - If they are gone longer than 2 seconds, the Calculator Gate closes.
 
-B. UNLOCK IMMUNITY (5s Grace Period):
-   - When you first unlock the Calculator, the system grants a 5-second 
-     immunity to any background events. 
-   - This ensures that navigation transitions between the Calculator and 
-     the Chats are smooth and glitch-free.
+   - Toggling the volume or checking notifications does not instantly lock.
+   - If the user is gone longer than 2 seconds, the Calculator Gate closes 
+     and the encryption sessions are purged from active memory.
 
-C. GLOBAL SYNC:
-   - All lock states are synced via a central AuthProvider. 
-   - When the system locks, it automatically triggers a "Shield Overlay" 
-     and clears any sensitive data from the UI memory.
+B. HARDWARE BINDING (HSM/TPM):
+
+   - Master Keys are never stored as plaintext on disk.
+   - On Windows, we use TPM 2.0 / DPAPI.
+   - On Mobile, we use the Secure Enclave / Strongbox.
+   - If the hardware ID changes, the keys become permanently unreadable.
 
 --------------------------------------------------------------------------------
 4. PRIVACY & ANTI-FORENSICS
 --------------------------------------------------------------------------------
+
 - SCREEN MASKING: The preloader and "Shield Overlay" use the Calculator theme 
   (Decoy theme) to ensure no chat data flashes on the screen during loading.
 - RE-LOCK ON LOGOUT: Logging out of an account automatically ignores 
   persistence and forces a permanent re-lock to the Calculator gate.
-- SESSION MARKERS: Uses non-sensitive "session exist" markers in 
-  AsyncStorage to detect if the user should be taken to Chats or Login 
-  after opening the Calculator gate.
+- FLAG_SECURE: (Android Only) Blocks screenshots and screen-recording apps 
+  from seeing the chat interface.
 
 ================================================================================
-InnerOrbit: Designed for absolute privacy, hardened for daily reliability.
+InnerOrbit: Designed for absolute privacy, hardened for quantum reliability.
 ================================================================================

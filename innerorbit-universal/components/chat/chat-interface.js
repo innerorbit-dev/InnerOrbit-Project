@@ -3,13 +3,14 @@ import React, { useEffect, useState, useRef, useMemo, useCallback } from "react"
 import { View, Text, FlatList, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, StyleSheet, Alert, Clipboard, Image, Modal, Keyboard, Animated } from "react-native";
 import { isWeb, select } from "../../utils/platform";
 import { useAuth } from "../../context/auth-context";
-import { subscribeToMessages, sendMessage, getUserProfile, deleteConversation, updateMessage, deleteMessageForEveryone, deleteMessageForMe, subscribeToUserPresence, markMessageAsRead, toggleMessageReaction, uploadChatImage, clearChatData } from "../../lib/firestore-service";
+import { subscribeToMessages, sendMessage, getUserProfile, deleteConversation, updateMessage, deleteMessageForEveryone, deleteMessageForMe, subscribeToUserPresence, markMessageAsRead, toggleMessageReaction, uploadChatImage, clearChatData, clearChatForMe, resetUnreadCount, updateConversationStealthMode, fetchV6PublicKeys } from "../../lib/firestore-service";
 import { getSuggestions } from "../../lib/suggestion-service";
 import { CustomImagePicker } from "../modals/CustomImagePicker";
 import * as ImageManipulator from 'expo-image-manipulator';
 import {
     encrypt,
-    encryptV5,
+    encryptV4,
+    encryptAsync,
     decryptAsync,
     deriveConversationKey,
     generateSafetyNumber,
@@ -17,6 +18,11 @@ import {
     resolveSendVersion,
     getRatchetSession
 } from "../../lib/encryption";
+import { hasKeyBackup, backupRatchetSession } from "../../lib/key-backup-service";
+import { MediaVaultService } from "../../lib/media-vault-service";
+import { ENC_VERSION_VAULT_V1 } from "../../lib/encryption-core";
+import PinRecoveryModal from "../modals/PinRecoveryModal";
+import { SafetyNumberModal } from "../modals/SafetyNumberModal";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { StatusBar } from "expo-status-bar";
@@ -31,6 +37,7 @@ import * as ScreenCapture from 'expo-screen-capture';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StealthKeyboard } from "../../keyboard-extension/StealthKeyboard";
+import { useCall } from "../../context/call-context";
 
 
 // Default Avatar
@@ -79,6 +86,7 @@ const ScheduledMessagesBar = ({ messages, onCancel, theme, isDark }) => {
 };
 
 const SuggestionsBar = ({ lastMessage, onSelect, theme, isDark }) => {
+
     // Only show suggestions for native mobile/desktop platforms, not web browser
     if (isWeb && !window.electron) return null;
     if (!lastMessage || lastMessage.isMe) return null;
@@ -289,7 +297,7 @@ const TimerPickerModal = ({ visible, onClose, onSave, mode, theme, isDark }) => 
 
 export function ChatInterface({
     conversationId, onBack, isMobile, nickname, onRename, otherUserUid,
-    privacyLevel = 0, hideHeader = false, containerStyle = {}
+    privacyLevel = 0, isStealth = false, hideHeader = false, containerStyle = {}
 }) {
     const { user } = useAuth();
     const { theme: THEME, isDark, chatBgStyle } = useAppTheme();
@@ -319,7 +327,43 @@ export function ChatInterface({
     const [includesImages, setIncludesImages] = useState(true);
     const [isPickerVisible, setIsPickerVisible] = useState(false);
     const [useStealthKeyboard, setUseStealthKeyboard] = useState(false);
+    const [myKeys, setMyKeys] = useState(null);
+    const [theirKeys, setTheirKeys] = useState(null);
+    const [showPinRecovery, setShowPinRecovery] = useState(false);
+    const { sessionPin } = useAuth();
+    
+    // Multi-select state
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedMessageIds, setSelectedMessageIds] = useState(new Set());
+    
+    const { startCall } = useCall();
 
+
+    const confirmToggleCapture = async () => {
+        setIsCaptureBlocked(!isCaptureBlocked);
+        setShowStealthModal(false);
+    };
+
+    useEffect(() => {
+        if (!isWeb) {
+            // Force hardware-level screenshot/recording block
+            ScreenCapture.preventScreenCaptureAsync();
+
+            // Listen for any attempted screenshots (primarily for iOS alerts)
+            const subscription = ScreenCapture.addScreenshotListener(() => {
+                Alert.alert(
+                    "🔒 Privacy Protected",
+                    "Screenshots and screen recordings are strictly disabled within InnerOrbit chats to prevent metadata leakage and unauthorized message persistence."
+                );
+                Logger.warn("[Security] User attempted a screenshot in chat.");
+            });
+
+            return () => {
+                ScreenCapture.allowScreenCaptureAsync();
+                subscription.remove();
+            };
+        }
+    }, []);
 
     useEffect(() => {
         let debounceTimer = null;
@@ -358,9 +402,10 @@ export function ChatInterface({
     const [scheduledMessages, setScheduledMessages] = useState([]); // Currently scheduled messages for this user
     const [timerModalVisible, setTimerModalVisible] = useState(false);
     const [timerModalMode, setTimerModalMode] = useState('schedule'); // 'schedule' or 'ephemeral'
-    const [isStealthMode, setIsStealthMode] = useState(false);
+    const [isCaptureBlocked, setIsCaptureBlocked] = useState(false);
     const [showFullEmojiPicker, setShowFullEmojiPicker] = useState(false);
     const [reactionMessageId, setReactionMessageId] = useState(null);
+    const [clearedAt, setClearedAt] = useState(0);
     const [contextMenu, setContextMenu] = useState({ visible: false, position: { x: 0, y: 0 }, message: null });
     const insets = useSafeAreaInsets();
     const flatListRef = useRef(null);
@@ -405,13 +450,15 @@ export function ChatInterface({
                 .catch(e => console.warn("[ChatInterface] ScreenCapture cleanup error:", e));
             if (isWeb) window.removeEventListener('keydown', handleKeyDown);
         };
-    }, [isStealthMode]);
+    }, [isCaptureBlocked]);
 
     // Reset state when conversation changes
     useEffect(() => {
         setMessages([]);
         setOtherUserId("");
         setEncryptionKey(null);
+        setEncryptionKey(null);
+        setClearedAt(0);
         setLoading(true);
     }, [conversationId]);
 
@@ -437,6 +484,10 @@ export function ChatInterface({
                     const convData = convSnap.data();
                     const participantIds = convData.participantIds || [];
 
+                    // Set clearedAt timestamp for filtering
+                    const userClearedAt = convData[`clearedAt_${user.uid}`]?.toMillis() || 0;
+                    setClearedAt(userClearedAt);
+
                     // Derive shared encryption key for this conversation
                     if (participantIds.length >= 2) {
                         const key = deriveConversationKey(conversationId, participantIds);
@@ -452,6 +503,40 @@ export function ChatInterface({
                     const foundUid = participantIds.find((id) => id !== user?.uid);
                     if (foundUid) {
                         setTargetUid(foundUid); // <--- SELF-HEAL MISSING PROP
+
+                        // 🛡️ Initialize Double Ratchet sessions (v4 & v6 Invisible Handshaking)
+                        import("../../lib/ratchet-key-service").then(async (svc) => {
+                            const activePin = sessionPin || user?.pin;
+                            
+                            // 🔄 Dedicated Auto Recovery Orchestrator
+                            const { ensureSessionWithAutoRecovery } = await import("../../lib/auto-recovery-service");
+                            const status = await ensureSessionWithAutoRecovery(conversationId, user, foundUid, activePin, svc);
+                            
+                            if (status === "NEEDS_PIN") {
+                                setShowPinRecovery(true);
+                            }
+
+                            // Quantum-Safe v6
+                            svc.initializeV6IfNeeded(conversationId, user.uid, foundUid)
+                                .then(async () => {
+                                    // Fetch keys for the safety number
+                                    const v6Session = await getV6Session(conversationId);
+                                    if (v6Session) {
+                                        setMyKeys({
+                                            identity: user.uid,
+                                            dh: v6Session.dhKeyPair.publicKey.toString('base64'),
+                                            pqc: Buffer.from(v6Session.ownPqcKeyPair.publicKey).toString('base64')
+                                        });
+                                        setTheirKeys({
+                                            identity: foundUid,
+                                            dh: v6Session.remoteDhPublicKey.toString('base64'),
+                                            pqc: Buffer.from(v6Session.remotePqcPublicKey).toString('base64')
+                                        });
+                                    }
+                                })
+                                .catch(err => Logger.warn(`[Ratchet-v6] Init failed:`, err));
+                        });
+                        
                         try {
                             const otherUserProfile = await getUserProfile(foundUid);
                             setOtherUserId(otherUserProfile?.userId || "????");
@@ -482,6 +567,13 @@ export function ChatInterface({
         };
         if (conversationId) fetchConversationData();
     }, [conversationId, user]);
+
+    // Reset unread badge immediately when conversation is opened
+    useEffect(() => {
+        if (conversationId && user?.uid) {
+            resetUnreadCount(conversationId, user.uid);
+        }
+    }, [conversationId, user?.uid]);
 
     // Subscribe to Other User's Presence
     useEffect(() => {
@@ -533,12 +625,16 @@ export function ChatInterface({
                     return;
                 }
 
+                // Filter messages cleared by the user locally
+                if (m.timestamp && m.timestamp.toMillis() <= clearedAt) return;
+
                 visible.push(m);
             });
 
             const getMessageVersion = (msg) => {
                 if (msg?.encVersion) return msg.encVersion;
                 const cipher = msg?.encryptedText || "";
+                if (cipher.startsWith("v6:")) return "v6";
                 if (cipher.startsWith("v5:")) return "v5";
                 if (cipher.startsWith("v4:")) return "v4";
                 if (cipher.startsWith("v3:")) return "v3";
@@ -552,12 +648,24 @@ export function ChatInterface({
                         if (!msg.encryptedText) {
                             return { ...msg, encryptedText: "..." };
                         }
+
                         if (!isEncrypted(msg.encryptedText)) {
                             // Fallback for plain text messages (e.g. system messages or old versions)
                             return { ...msg, encryptedText: msg.encryptedText };
                         }
-                        const decrypted = await decryptAsync(msg.encryptedText, encryptionKey, conversationId);
-                        if (decrypted === "🔒 Encrypted Message" || decrypted === "🔒 Decryption Failed") {
+
+                        const decrypted = await decryptAsync(
+                            msg.encryptedText,
+                            encryptionKey,
+                            conversationId,
+                            undefined, // pqcSecretKey
+                            user?.uid,
+                            targetUid,
+                            msg.id, // 🛡️ Persistent Vault ID
+                            isStealth // 🕵️ Stealth Mode (Skip Cache)
+                        );
+
+                        if (decrypted === "🔒 Message Hidden" || decrypted === "🔒 Failed" || decrypted === "🔒 Encrypted") {
                             Logger.warn(`[ChatInterface] decrypt failed conv=${conversationId?.substring(0, 5)} version=${getMessageVersion(msg)} msg=${msg?.id?.substring(0, 5)}`);
                         }
                         return { ...msg, encryptedText: decrypted };
@@ -587,12 +695,18 @@ export function ChatInterface({
 
             setLoading(false);
 
-            // Mark received messages as read
+            // Mark received messages as read and reset unread badge
             msgs.forEach(msg => {
                 if (msg.senderId !== user?.uid && msg.status !== 'read') {
                     markMessageAsRead(conversationId, msg.id);
                 }
             });
+            // Always reset the conversation-level unread badge when the user has the chat open.
+            // This covers the case where messages were already marked 'read' but the counter
+            // wasn't zeroed (e.g. after a failed clear-chat, or first load).
+            if (user?.uid && msgs.length > 0) {
+                resetUnreadCount(conversationId, user.uid);
+            }
 
             // Short delay ensuring layout complete
             if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
@@ -624,29 +738,56 @@ export function ChatInterface({
         try {
             setSending(true);
             const hasLocalRatchetSession = !!(await getRatchetSession(conversationId));
+            const hasV6Session = !!(await getV6Session(conversationId));
+
             const sendPolicy = resolveSendVersion({
-                localCapabilities: { v5: true, minReadable: 1, maxWritable: 5 },
+                localCapabilities: { v5: true, v5_5: true, v6: true, minReadable: 1, maxWritable: 6 },
                 remoteCapabilities: remoteEncryptionCapabilities,
-                hasLocalRatchetSession
+                hasLocalRatchetSession,
+                hasV6Session
             });
 
             let encryptedText;
             let encVersion;
-            if (sendPolicy.version === "v5") {
+
+            if (sendPolicy.version === "v6") {
                 try {
-                    encryptedText = await encryptV5(conversationId, messageText);
-                    encVersion = "v5";
-                } catch (v5Error) {
-                    Logger.warn(`[ChatInterface] v5_send_failed conv=${conversationId?.substring(0, 5)} fallback=v3 reason=${v5Error?.message || "unknown"}`);
-                    encryptedText = encrypt(messageText, encryptionKey);
-                    encVersion = encryptedText?.startsWith("v3:") ? "v3" : "legacy";
+                    encryptedText = await encryptV6(conversationId, messageText);
+                    encVersion = "v6";
+                } catch (v6Error) {
+                    Logger.warn(`[ChatInterface] v6_send_failed fallback=v5.5 reason=${v6Error?.message}`);
+                    encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v5.5");
+                    encVersion = "v5.5";
                 }
+            } else if (sendPolicy.version === "v5.5") {
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v5.5");
+                encVersion = "v5.5";
+            } else if (sendPolicy.version === "v5") {
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v5");
+                encVersion = "v5";
+            } else if (sendPolicy.version === "v4") {
+                try {
+                    encryptedText = await encryptV4(conversationId, messageText);
+                    encVersion = "v4";
+                } catch (v4Error) {
+                    Logger.warn(`[ChatInterface] v4_send_failed conv=${conversationId?.substring(0, 5)} fallback=v3 reason=${v4Error?.message || "unknown"}`);
+                    encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v3");
+                    encVersion = "v3";
+                }
+            } else if (sendPolicy.version === "v3") {
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v3");
+                encVersion = "v3";
+            } else if (sendPolicy.version === "v2") {
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v2");
+                encVersion = "v2";
             } else {
-                encryptedText = encrypt(messageText, encryptionKey);
-                encVersion = encryptedText?.startsWith("v3:") ? "v3" : "legacy";
+                // Absolute Minimum (Should not happen with new policy but keeping for safety)
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v2");
+                encVersion = "v2";
             }
+            
             if (sendPolicy.version === "legacy") {
-                Logger.warn(`[ChatInterface] fallback_send conv=${conversationId?.substring(0, 5)} reason=${sendPolicy.reason}`);
+                Logger.error(`[ChatInterface] 🚨 Policy Violation: resolveSendVersion returned legacy! Forced upgrade to v2.`);
             }
 
             if (editingMessage) {
@@ -663,7 +804,15 @@ export function ChatInterface({
             setMessageText("");
         } catch (error) {
             Logger.error("Error sending message:", error);
-            Alert.alert("Failed", "Could not send message. Please check your connection.");
+            if (error?.message === "CHAT_SERVICE_UNAVAILABLE") {
+                Alert.alert(
+                    "Service Unavailable",
+                    "Chat services are temporarily unavailable right now. Please wait while we restore the service.",
+                    [{ text: "Got it" }]
+                );
+            } else {
+                Alert.alert("Failed", "Could not send message. Please check your connection.");
+            }
         } finally {
             setSending(false);
         }
@@ -679,27 +828,45 @@ export function ChatInterface({
             setSending(true);
 
             // 1. Process/Compress Image
-            Logger.log("Custom image selected:", asset);
+            Logger.log("[MediaVault] Processing image for vault upload:", asset.uri);
             const manipulatedImage = await ImageManipulator.manipulateAsync(
                 asset.uri,
-                [{ resize: { width: 1200 } }], // Resize to max 1200px width (maintains aspect ratio)
-                { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG } // 70% quality JPEG
+                [{ resize: { width: 1200 } }], 
+                { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
             );
 
-            Logger.log(`[ImageProcessor] Original URI: ${asset.uri} `);
-            Logger.log(`[ImageProcessor] Compressed URI: ${manipulatedImage.uri} `);
+            // 2. Resolve Recipient PQC Public Key
+            // We need this for the 3-layer vault encryption
+            if (!targetUid) throw new Error("RECIPIENT_UNKNOWN");
+            
+            const v6Keys = await fetchV6PublicKeys(targetUid);
+            if (!v6Keys || !v6Keys.pqc) {
+                Logger.warn("[MediaVault] Recipient missing PQC keys. Falling back to legacy upload.");
+                const imageUrl = await uploadChatImage(manipulatedImage.uri, conversationId);
+                await sendMessage(conversationId, user?.uid, imageUrl, replyingTo, scheduledDelay, 'image', ephemeralDuration);
+            } else {
+                // 3. Upload via Secure Media Vault
+                const pqcPublicKey = Buffer.from(v6Keys.pqc, 'base64');
+                const vaultId = await MediaVaultService.uploadMedia(
+                    manipulatedImage.uri,
+                    conversationId,
+                    user?.uid,
+                    pqcPublicKey,
+                    'image/jpeg'
+                );
 
-            // 2. Upload Compressed Image
-            const imageUrl = await uploadChatImage(manipulatedImage.uri, conversationId);
+                // 4. Send Message with Vault ID
+                await sendMessage(conversationId, user?.uid, vaultId, replyingTo, scheduledDelay, 'vault_media', ephemeralDuration, {
+                    encVersion: ENC_VERSION_VAULT_V1
+                });
+            }
 
-            // 3. Send Message
-            await sendMessage(conversationId, user?.uid, imageUrl, replyingTo, scheduledDelay, 'image', ephemeralDuration);
             setScheduledDelay(0);
             setEphemeralDuration(0);
             setReplyingTo(null);
         } catch (error) {
-            Logger.error("Error processing/uploading image:", error);
-            Alert.alert("Error", "Failed to upload image. Please try again.");
+            Logger.error("Error processing/uploading vault media:", error);
+            Alert.alert("Vault Error", "Secure upload failed. Please check your connection.");
         } finally {
             setSending(false);
         }
@@ -772,8 +939,74 @@ export function ChatInterface({
     };
 
     const handleSelectMessage = () => {
-        Logger.log('Select message:', contextMenu.message?.id);
-        Alert.alert('Coming Soon', 'Multi-select feature will be available soon.');
+        if (contextMenu.message) {
+            setIsSelectionMode(true);
+            setSelectedMessageIds(new Set([contextMenu.message.id]));
+        }
+    };
+
+    const toggleMessageSelection = (messageId) => {
+        setSelectedMessageIds(prev => {
+            const next = new Set(prev);
+            if (next.has(messageId)) {
+                next.delete(messageId);
+                if (next.size === 0) setIsSelectionMode(false);
+            } else {
+                next.add(messageId);
+            }
+            return next;
+        });
+    };
+
+    const handleBulkDelete = () => {
+        if (selectedMessageIds.size === 0) return;
+
+        const count = selectedMessageIds.size;
+        const selectedMsgs = messages.filter(m => selectedMessageIds.has(m.id));
+        const allMine = selectedMsgs.every(m => m.senderId === user?.uid);
+
+        Alert.alert(
+            `Delete ${count} Message${count > 1 ? 's' : ''}`,
+            "Choose a deletion method",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete for Me",
+                    onPress: async () => {
+                        setLoading(true);
+                        try {
+                            for (const id of selectedMessageIds) {
+                                await deleteMessageForMe(conversationId, id, user?.uid);
+                            }
+                            setIsSelectionMode(false);
+                            setSelectedMessageIds(new Set());
+                        } catch (e) {
+                            Alert.alert("Error", "Failed to delete some messages.");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                },
+                ...(allMine ? [{
+                    text: "Delete for Everyone",
+                    style: 'destructive',
+                    onPress: async () => {
+                        setLoading(true);
+                        try {
+                            for (const id of selectedMessageIds) {
+                                await deleteMessageForEveryone(conversationId, id);
+                            }
+                            setIsSelectionMode(false);
+                            setSelectedMessageIds(new Set());
+                        } catch (e) {
+                            Alert.alert("Error", "Failed to delete for everyone.");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }] : [])
+            ]
+        );
     };
 
 
@@ -807,6 +1040,9 @@ export function ChatInterface({
             onDelete={handleDelete}
             conversationId={conversationId}
             displayName={nickname || otherUserId}
+            isSelectionMode={isSelectionMode}
+            isSelected={selectedMessageIds.has(item.id)}
+            onSelectToggle={() => toggleMessageSelection(item.id)}
         />
     ), [user?.uid, THEME, otherUserPhoto, activeMenuId, conversationId, nickname, otherUserId, handleMessageLongPress, handleMessageRightClick, handleDelete]);
 
@@ -907,8 +1143,11 @@ export function ChatInterface({
                         </View>
 
                         {/* Center: E2E & Privacy Level - Absolute Centered */}
-                        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'none' }}>
-                            <View style={{ alignItems: 'center' }}>
+                        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', zIndex: 1, pointerEvents: 'box-none' }}>
+                            <Pressable 
+                                onPress={() => setShowSafetyModal(true)}
+                                style={({ pressed }) => ({ alignItems: 'center', opacity: pressed ? 0.7 : 1, pointerEvents: 'auto' })}
+                            >
                                 {!isMobile && (
                                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                         <Feather name="lock" size={10} color="#3B82F6" style={{ marginRight: 4 }} />
@@ -916,17 +1155,34 @@ export function ChatInterface({
                                     </View>
                                 )}
                                 <Text style={{ fontSize: 10, color: THEME.primary, fontWeight: '700', marginTop: isMobile ? 0 : 2 }}>{privacyLevel === 99 ? 'EMERGENCY' : `LEVEL ${privacyLevel} `}</Text>
-                            </View>
+                            </Pressable>
                         </View>
 
-                        {/* Right: Call & Menu */}
+                        {/* Right: Stealth Toggle & Anti-Capture & Call & Menu */}
                         <View style={{ flexDirection: 'row', alignItems: 'center', zIndex: 10 }}>
-                            <Text
-                                onPress={() => Alert.alert("Call", "Voice/Video calling feature coming soon!")}
+
+                            {/* Anti-Capture Toggle */}
+                            {!isWeb && (
+                                <Pressable
+                                    onPress={() => {
+                                        setShowStealthModal(true); 
+                                    }}
+                                    style={{ padding: 8, marginTop: 6, marginRight: 4 }}
+                                >
+                                    <Feather 
+                                        name={isCaptureBlocked ? "shield" : "shield-off"} 
+                                        size={20} 
+                                        color={isCaptureBlocked ? THEME.primary : THEME.textSecondary} 
+                                    />
+                                </Pressable>
+                            )}
+
+                            <Pressable
+                                onPress={() => startCall(otherUserUid, nickname || otherUserDisplayName || otherUserId)}
                                 style={{ padding: 8, marginTop: 6, marginRight: 4 }}
                             >
                                 <Feather name="phone" size={20} color={THEME.primary} />
-                            </Text>
+                            </Pressable>
                             <Pressable onPress={() => setShowMenu(!showMenu)} style={{ padding: 8, marginTop: 6 }}>
                                 <Feather name="more-vertical" size={24} color={THEME.primary} />
                             </Pressable>
@@ -1021,21 +1277,23 @@ export function ChatInterface({
                                     <Text style={{ color: "#EF4444", fontSize: 14 }}>Clear Chat</Text>
                                 </Pressable>
 
-                                <Pressable
-                                    onPress={() => {
-                                        setShowMenu(false);
-                                        setIsStealthMode(!isStealthMode);
-                                        setShowStealthModal(true);
-                                    }}
-                                    style={({ pressed }) => ({
-                                        flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 8,
-                                        backgroundColor: pressed ? 'rgba(255,255,255,0.05)' : 'transparent',
-                                        marginTop: 4
-                                    })}
-                                >
-                                    <Feather name="eye-off" size={16} color={isStealthMode ? THEME.primary : THEME.text} style={{ marginRight: 10 }} />
-                                    <Text style={{ color: isStealthMode ? THEME.primary : THEME.text, fontSize: 14 }}>Stealth Mode</Text>
-                                </Pressable>
+
+                                {!isWeb && (
+                                    <Pressable
+                                        onPress={() => {
+                                            setShowMenu(false);
+                                            setShowStealthModal(true);
+                                        }}
+                                        style={({ pressed }) => ({
+                                            flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 8,
+                                            backgroundColor: pressed ? 'rgba(255,255,255,0.05)' : 'transparent',
+                                            marginTop: 4
+                                        })}
+                                    >
+                                        <Feather name={isCaptureBlocked ? "shield" : "shield-off"} size={16} color={isCaptureBlocked ? THEME.primary : THEME.text} style={{ marginRight: 10 }} />
+                                        <Text style={{ color: isCaptureBlocked ? THEME.primary : THEME.text, fontSize: 14 }}>Hardware Shield</Text>
+                                    </Pressable>
+                                )}
 
                                 <Pressable
                                     onPress={() => {
@@ -1148,15 +1406,51 @@ export function ChatInterface({
                 }
 
                 {/* Input Area */}
-                <BlurView intensity={100} tint={isDark ? "dark" : "light"} style={[
-                    styles.inputContainer,
-                    {
-                        marginBottom: keyboardVisible ? 2 : 10,
-                        paddingTop: 12,
-                        paddingBottom: Math.max(insets.bottom || 0, 12),
-                        backgroundColor: 'transparent',
-                        borderTopWidth: 0,
-                    }]}>
+                {/* Selection Mode Action Bar */}
+                {isSelectionMode ? (
+                    <BlurView intensity={100} tint={isDark ? "dark" : "light"} style={[
+                        styles.inputContainer,
+                        {
+                            paddingTop: 12,
+                            paddingBottom: Math.max(insets.bottom || 0, 12),
+                            borderTopWidth: 1,
+                            borderTopColor: THEME.border,
+                        }
+                    ]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingHorizontal: 16 }}>
+                            <Pressable 
+                                onPress={() => {
+                                    setIsSelectionMode(false);
+                                    setSelectedMessageIds(new Set());
+                                }}
+                                style={{ padding: 8 }}
+                            >
+                                <Text style={{ color: THEME.primary, fontWeight: '600' }}>Cancel</Text>
+                            </Pressable>
+                            
+                            <Text style={{ color: THEME.text, fontWeight: 'bold' }}>
+                                {selectedMessageIds.size} Selected
+                            </Text>
+
+                            <Pressable 
+                                onPress={handleBulkDelete}
+                                disabled={selectedMessageIds.size === 0}
+                                style={{ padding: 8, opacity: selectedMessageIds.size === 0 ? 0.3 : 1 }}
+                            >
+                                <Feather name="trash-2" size={24} color="#EF4444" />
+                            </Pressable>
+                        </View>
+                    </BlurView>
+                ) : (
+                    <BlurView intensity={100} tint={isDark ? "dark" : "light"} style={[
+                        styles.inputContainer,
+                        {
+                            marginBottom: keyboardVisible ? 2 : 10,
+                            paddingTop: 12,
+                            paddingBottom: Math.max(insets.bottom || 0, 12),
+                            backgroundColor: 'transparent',
+                            borderTopWidth: 0,
+                        }]}>
                     <LinearGradient
                         colors={isDark ?
                             ['rgba(0, 0, 0, 0.98)', 'rgba(15, 23, 42, 0.75)', 'rgba(0, 0, 0, 0.98)'] :
@@ -1315,50 +1609,17 @@ export function ChatInterface({
                         </View>
                     </LinearGradient>
                 </BlurView>
+                )}
 
                 {/* Safety Number Modal */}
-                < Modal
+                <SafetyNumberModal
                     visible={showSafetyModal}
-                    transparent={true}
-                    animationType="fade"
-                    onRequestClose={() => setShowSafetyModal(false)
-                    }
-                >
-                    <View style={{ flex: 1, backgroundColor: isDark ? 'rgba(0, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.4)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-                        <View style={{
-                            width: '100%', maxWidth: 360,
-                            backgroundColor: THEME.surface,
-                            borderRadius: 24,
-                            padding: 32,
-                            borderWidth: 1, borderColor: THEME.primary,
-                            ...select({ web: { boxShadow: `0px 0px 20px ${THEME.primary}` }, default: { shadowColor: THEME.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 20 } })
-                        }}>
-                            <View style={{ alignItems: 'center', marginBottom: 24 }}>
-                                <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(52, 211, 153, 0.1)', justifyContent: 'center', alignItems: 'center', marginBottom: 16 }}>
-                                    <Feather name="shield" size={32} color={THEME.success} />
-                                </View>
-                                <Text style={{ fontSize: 20, fontWeight: 'bold', color: THEME.text, textAlign: 'center' }}>Encryption Verified</Text>
-                                <Text style={{ fontSize: 13, color: THEME.textSecondary, textAlign: 'center', marginTop: 8 }}>
-                                    Messages between you and this contact are end-to-end encrypted.
-                                </Text>
-                            </View>
-
-                            <View style={{ backgroundColor: THEME.background, padding: 20, borderRadius: 16, marginBottom: 24, alignItems: 'center', borderWidth: 1, borderColor: THEME.border }}>
-                                <Text style={{ fontSize: 12, color: THEME.textSecondary, marginBottom: 8, letterSpacing: 1 }}>SAFETY NUMBER</Text>
-                                <Text style={{ color: THEME.text, fontFamily: select({ ios: 'Courier', default: 'monospace' }), fontSize: 22, fontWeight: '700', letterSpacing: 2, textAlign: 'center' }}>
-                                    {safetyNumber.match(/.{1,6}/g)?.join(' ')}
-                                </Text>
-                            </View>
-
-                            <Pressable
-                                onPress={() => setShowSafetyModal(false)}
-                                style={{ backgroundColor: THEME.primary, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
-                            >
-                                <Text style={{ color: '#0F172A', fontWeight: 'bold', fontSize: 16 }}>Verified</Text>
-                            </Pressable>
-                        </View>
-                    </View>
-                </Modal >
+                    onClose={() => setShowSafetyModal(false)}
+                    myKeys={myKeys}
+                    theirKeys={theirKeys}
+                    otherUserName={nickname || otherUserDisplayName || otherUserId}
+                    THEME={THEME}
+                />
 
                 {/* Full Emoji Picker Modal */}
                 < Modal
@@ -1409,8 +1670,8 @@ export function ChatInterface({
                     </View>
                 </Modal >
 
-                {/* Stealth Mode Modal */}
-                < Modal
+                {/* Hardware Protection Modal (Anti-Capture) */}
+                <Modal
                     visible={showStealthModal}
                     transparent={true}
                     animationType="fade"
@@ -1422,10 +1683,10 @@ export function ChatInterface({
                             backgroundColor: THEME.surface,
                             borderRadius: 24,
                             padding: 32,
-                            borderWidth: 1, borderColor: isStealthMode ? THEME.primary : THEME.border,
+                            borderWidth: 1, borderColor: THEME.border,
                             ...select({
                                 ios: {
-                                    shadowColor: isStealthMode ? THEME.primary : '#000',
+                                    shadowColor: isCaptureBlocked ? THEME.primary : '#000',
                                     shadowOffset: { width: 0, height: 0 },
                                     shadowOpacity: 0.2,
                                     shadowRadius: 20
@@ -1434,7 +1695,7 @@ export function ChatInterface({
                                     elevation: 10,
                                 },
                                 web: {
-                                    boxShadow: isStealthMode
+                                    boxShadow: isCaptureBlocked
                                         ? `0px 0px 20px ${THEME.primary}`
                                         : '0px 0px 20px rgba(0, 0, 0, 0.2)',
                                 }
@@ -1443,27 +1704,40 @@ export function ChatInterface({
                             <View style={{ alignItems: 'center', marginBottom: 24 }}>
                                 <View style={{
                                     width: 64, height: 64, borderRadius: 32,
-                                    backgroundColor: isStealthMode ? 'rgba(251, 113, 133, 0.1)' : 'rgba(100, 116, 139, 0.1)',
+                                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
                                     justifyContent: 'center', alignItems: 'center', marginBottom: 16
                                 }}>
-                                    <Feather name={isStealthMode ? "eye-off" : "eye"} size={32} color={isStealthMode ? THEME.primary : THEME.textSecondary} />
+                                    <Feather 
+                                        name="shield" 
+                                        size={32} 
+                                        color={THEME.primary} 
+                                    />
                                 </View>
                                 <Text style={{ fontSize: 20, fontWeight: 'bold', color: THEME.text, textAlign: 'center' }}>
-                                    {isStealthMode ? "Stealth Mode On" : "Stealth Mode Off"}
+                                    {isCaptureBlocked ? "Disable Shield?" : "Enable Shield?"}
                                 </Text>
-                                <Text style={{ fontSize: 14, color: THEME.textSecondary, textAlign: 'center', marginTop: 12 }}>
-                                    {isStealthMode
-                                        ? "You will be notified if a screenshot is taken (Simulation)."
-                                        : "Screenshot detection disabled."}
+                                <Text style={{ fontSize: 14, color: THEME.textSecondary, textAlign: 'center', marginTop: 12, lineHeight: 20 }}>
+                                    "Hardware protection prevents screenshots and screen recordings on this device. This provides maximum physical privacy."
                                 </Text>
                             </View>
 
-                            <Pressable
-                                onPress={() => setShowStealthModal(false)}
-                                style={{ backgroundColor: THEME.primary, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
-                            >
-                                <Text style={{ color: '#0F172A', fontWeight: 'bold', fontSize: 16 }}>Got it</Text>
-                            </Pressable>
+                            <View style={{ gap: 12 }}>
+                                <Pressable
+                                    onPress={confirmToggleCapture}
+                                    style={{ backgroundColor: THEME.primary, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
+                                >
+                                    <Text style={{ color: '#0F172A', fontWeight: 'bold', fontSize: 16 }}>
+                                        {isCaptureBlocked ? "Disable Hardware Protection" : "Enable Hardware Protection"}
+                                    </Text>
+                                </Pressable>
+
+                                <Pressable
+                                    onPress={() => setShowStealthModal(false)}
+                                    style={{ paddingVertical: 12, alignItems: 'center' }}
+                                >
+                                    <Text style={{ color: THEME.textSecondary, fontWeight: '600' }}>Cancel</Text>
+                                </Pressable>
+                            </View>
                         </View>
                     </View>
                 </Modal >
@@ -1502,32 +1776,49 @@ export function ChatInterface({
                                 <Text style={{ color: THEME.text, fontSize: 15 }}>Also delete images/media</Text>
                             </Pressable>
 
-                            <View style={{ flexDirection: 'row', gap: 12 }}>
+                            <View style={{ gap: 10 }}>
                                 <Pressable
-                                    onPress={() => setShowClearChatModal(false)}
-                                    style={{ flex: 1, paddingVertical: 14, borderRadius: 14, borderWidth: 1, borderColor: THEME.border, alignItems: 'center' }}
+                                    onPress={async () => {
+                                        setShowClearChatModal(false);
+                                        setLoading(true);
+                                        try {
+                                            await clearChatForMe(conversationId, user.uid);
+                                            setClearedAt(Date.now()); // Update local state immediately
+                                            Alert.alert("Success", "Chat cleared for you.");
+                                        } catch (e) {
+                                            Alert.alert("Error", "Failed to clear chat locally.");
+                                        } finally {
+                                            setLoading(false);
+                                        }
+                                    }}
+                                    style={{ backgroundColor: THEME.primary, paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
                                 >
-                                    <Text style={{ color: THEME.text, fontWeight: '600' }}>Cancel</Text>
+                                    <Text style={{ color: '#0F172A', fontWeight: 'bold' }}>Clear for Me</Text>
                                 </Pressable>
+
                                 <Pressable
                                     onPress={async () => {
                                         setShowClearChatModal(false);
                                         setLoading(true);
                                         try {
                                             await clearChatData(conversationId, includesImages);
-                                            // Since we are clearing data, we don't necessarily need to go back
-                                            // but if the user wants to "Delete Chat" (destroy doc), they can do that still.
-                                            // If they just "Clear Chat", we stay in conversation.
-                                            Alert.alert("Success", "Chat has been cleared.");
+                                            Alert.alert("Success", "Chat cleared for everyone.");
                                         } catch (e) {
-                                            Alert.alert("Error", "Failed to clear chat.");
+                                            Alert.alert("Error", "Failed to clear chat for everyone.");
                                         } finally {
                                             setLoading(false);
                                         }
                                     }}
-                                    style={{ flex: 1, backgroundColor: '#EF4444', paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
+                                    style={{ backgroundColor: '#EF4444', paddingVertical: 14, borderRadius: 14, alignItems: 'center' }}
                                 >
-                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Clear All</Text>
+                                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>Clear for Everyone</Text>
+                                </Pressable>
+
+                                <Pressable
+                                    onPress={() => setShowClearChatModal(false)}
+                                    style={{ paddingVertical: 12, alignItems: 'center' }}
+                                >
+                                    <Text style={{ color: THEME.textSecondary, fontWeight: '600' }}>Cancel</Text>
                                 </Pressable>
                             </View>
                         </View>
@@ -1590,6 +1881,15 @@ export function ChatInterface({
                 onKeyPress={(char) => setMessageText(prev => prev + char)}
                 onBackspace={() => setMessageText(prev => prev.slice(0, -1))}
                 onSend={handleSendMessage}
+            />
+
+            <PinRecoveryModal
+                visible={showPinRecovery}
+                uid={user?.uid}
+                convId={conversationId}
+                partnerUid={targetUid}
+                onSuccess={() => setShowPinRecovery(false)}
+                onDismiss={() => setShowPinRecovery(false)}
             />
         </View>
     );

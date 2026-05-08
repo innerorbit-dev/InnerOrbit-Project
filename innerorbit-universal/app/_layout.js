@@ -15,6 +15,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import * as SplashScreen from 'expo-splash-screen';
 import * as WebBrowser from 'expo-web-browser';
 import { NetworkProvider } from '../context/network-context';
+import { CallProvider, useCall } from '../context/call-context';
 import { SessionExpiredModal } from '../components/session-expired-modal';
 import { NetworkStatusBanner } from '../components/ui/network-status-banner';
 import { UpdatePillNotification } from '../components/ui/update-pill-notification';
@@ -25,6 +26,10 @@ import { registerBackgroundUpdateTask } from '../lib/background-tasks';
 import InstallerWizard from '../components/setup/InstallerWizard';
 import DesktopTitleBar from '../components/ui/DesktopTitleBar';
 import { LOGO_BASE64 } from '../lib/logo-base64';
+import { WebRTCService } from "../lib/webrtc-service";
+import { ActiveVoiceCall } from "../components/calling/ActiveVoiceCall";
+import { IncomingCallModal } from "../components/calling/IncomingCallModal";
+import * as ScreenCapture from 'expo-screen-capture';
 
 import { ErrorBoundary as CustomErrorBoundary } from '../components/error-boundary';
 export { CustomErrorBoundary as ErrorBoundary };
@@ -37,10 +42,12 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <NetworkProvider>
             <AuthProvider>
-              <BottomTabBarHeightContext.Provider value={0}>
-                <RootLayoutNav />
-              </BottomTabBarHeightContext.Provider>
-              <StatusBar style="auto" />
+              <CallProvider>
+                <BottomTabBarHeightContext.Provider value={0}>
+                  <RootLayoutNav />
+                </BottomTabBarHeightContext.Provider>
+                <StatusBar style="auto" />
+              </CallProvider>
             </AuthProvider>
           </NetworkProvider>
         </GestureHandlerRootView>
@@ -58,6 +65,8 @@ function RootLayoutNav() {
   const { theme, loading: themeLoading } = useAppTheme();
   const segments = useSegments();
   const router = useRouter();
+
+  const { activeCall, incomingCall, answerCall, rejectCall, hangUp } = useCall();
 
   const [fontsLoaded, fontsError] = useFonts({
     Outfit_400Regular, Outfit_600SemiBold, Outfit_700Bold,
@@ -149,15 +158,31 @@ function RootLayoutNav() {
     requestNotificationPermissions().catch(err => Logger.log('Perms denied:', err));
     if (!isWeb) {
       registerBackgroundUpdateTask().catch(err => Logger.error('Background task error:', err));
+      
+      // 🛡️ Global Anti-Screen Capture (React Level)
+      // Enforces FLAG_SECURE on Android and detection/blocking where supported on iOS.
+      ScreenCapture.preventScreenCaptureAsync()
+        .catch(err => Logger.warn('[Security] ScreenCapture block failed:', err));
     }
   }, []);
 
   const isReady = fontsLoaded && !authLoading && !themeLoading;
+  const [isSettled, setIsSettled] = useState(false);
+
+  useEffect(() => {
+    if (isReady && !isLoggingOut) {
+      const timer = setTimeout(() => setIsSettled(true), 100);
+      return () => clearTimeout(timer);
+    } else {
+      setIsSettled(false);
+    }
+  }, [isReady, isLoggingOut]);
+
   const isPublicRoute = segments.length === 0 || segments[0] === "login" || segments[0] === "signup";
   const shouldBlockRender = isReady && user && isPublicRoute && !(isDecoyMode && segments.length === 0) && !welcomeData;
 
   useEffect(() => {
-    if (!isReady || isLoggingOut) return;
+    if (!isReady || !isSettled || isLoggingOut) return;
     const isPrivate = segments[0] === "home" || segments[0] === "chat-detail";
     const isDecoy = segments.length === 0 || segments[0] === "CalcX";
     const isAuth = segments[0] === "login" || segments[0] === "signup";
@@ -263,6 +288,23 @@ function RootLayoutNav() {
           onConfirm={() => setShowExpiredModal(false)}
           theme={theme}
         />
+
+        {/* Global Calling Layer */}
+        <IncomingCallModal 
+          visible={!!incomingCall}
+          callerName={incomingCall?.callerName || "Private Contact"}
+          onAnswer={answerCall}
+          onReject={rejectCall}
+        />
+
+        {activeCall && (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]}>
+            <ActiveVoiceCall 
+              peerName={activeCall.peerName || activeCall.callerName || "Contact"}
+              onHangUp={hangUp}
+            />
+          </View>
+        )}
       </>
     );
   } catch (e) {

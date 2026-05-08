@@ -17,6 +17,9 @@ export function SecuritySettings({ theme }) {
     const [manualLoginCount, setManualLoginCount] = useState(0);
     const [declineCount, setDeclineCount] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [keyBackupEnabled, setKeyBackupEnabled] = useState(true);
+    const [autoRecoveryEnabled, setAutoRecoveryEnabled] = useState(true);
+    const [backgroundSyncEnabled, setBackgroundSyncEnabled] = useState(true);
 
     // Load current settings
     useEffect(() => {
@@ -40,6 +43,14 @@ export function SecuritySettings({ theme }) {
             const declines = await SecureStorage.getDeclineCount();
             setManualLoginCount(loginCount);
             setDeclineCount(declines);
+
+            // Check if key backup is enabled in Firestore
+            const { getUserProfile } = await import('../../lib/firestore-service');
+            const profile = await getUserProfile(auth.currentUser.uid);
+            // Default to TRUE unless explicitly set to false
+            setKeyBackupEnabled(profile?.settings?.keyBackupEnabled !== false);
+            setAutoRecoveryEnabled(profile?.settings?.autoRecoveryEnabled !== false);
+            setBackgroundSyncEnabled(profile?.settings?.backgroundSyncEnabled !== false);
         } catch (error) {
             console.error('Error loading security settings:', error);
         } finally {
@@ -168,6 +179,75 @@ export function SecuritySettings({ theme }) {
         );
     };
 
+    const handleToggleKeyBackup = async (value) => {
+        try {
+            setLoading(true);
+            const { updateUserProfile } = await import('../../lib/firestore-service');
+            await updateUserProfile(auth.currentUser.uid, {
+                'settings.keyBackupEnabled': value
+            });
+            setKeyBackupEnabled(value);
+            
+            if (value) {
+                Alert.alert(
+                    'Recovery Enabled',
+                    'Your message keys will now be backed up using your PIN. If you log in on another device, you can restore your chat history using your InnerOrbit PIN.'
+                );
+            }
+        } catch (error) {
+            console.error('Error toggling key backup:', error);
+            Alert.alert('Error', 'Failed to update recovery setting.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleToggleAutoRecovery = async (value) => {
+        try {
+            setLoading(true);
+            const { updateUserProfile } = await import('../../lib/firestore-service');
+            await updateUserProfile(auth.currentUser.uid, {
+                'settings.autoRecoveryEnabled': value
+            });
+            setAutoRecoveryEnabled(value);
+            
+            if (!value) {
+                Alert.alert(
+                    'Manual PIN Required',
+                    'You will now be prompted to enter your PIN manually whenever restoring your chat history on a new device.'
+                );
+            }
+        } catch (error) {
+            console.error('Error toggling auto recovery:', error);
+            Alert.alert('Error', 'Failed to update auto recovery setting.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleToggleBackgroundSync = async (value) => {
+        try {
+            setLoading(true);
+            const { updateUserProfile } = await import('../../lib/firestore-service');
+            await updateUserProfile(auth.currentUser.uid, {
+                'settings.backgroundSyncEnabled': value
+            });
+            setBackgroundSyncEnabled(value);
+            
+            if (value) {
+                Alert.alert(
+                    'Background Sync Active',
+                    'The app will now automatically synchronize encryption keys and messages while in the background.'
+                );
+            }
+        } catch (error) {
+            console.error('Error toggling background sync:', error);
+            Alert.alert('Error', 'Failed to update background sync setting.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleResetTracking = () => {
         Alert.alert(
             'Reset Persistence Tracking?',
@@ -293,8 +373,39 @@ export function SecuritySettings({ theme }) {
             <View style={styles.section}>
                 <SectionHeader title="Advanced" icon="settings" />
 
+                <SettingRow
+                    icon="refresh-cw"
+                    title="Cross-Device Recovery"
+                    description="Backup encryption keys using your PIN. Required for multi-device usage or when changing phones."
+                    value={keyBackupEnabled}
+                    onValueChange={handleToggleKeyBackup}
+                    iconBg="rgba(108, 99, 255, 0.1)"
+                />
+                
+                {keyBackupEnabled && (
+                    <>
+                        <SettingRow
+                            icon="unlock"
+                            title="Auto-Decrypt Backups"
+                            description="Silently unlock chat history using your cached PIN. If off, you will be prompted to enter your PIN manually."
+                            value={autoRecoveryEnabled}
+                            onValueChange={handleToggleAutoRecovery}
+                            iconBg="rgba(59, 130, 246, 0.1)"
+                        />
+
+                        <SettingRow
+                            icon="activity"
+                            title="Background Synchronization"
+                            description="Automatically sync encryption keys and fetch messages while the app is in the background."
+                            value={backgroundSyncEnabled}
+                            onValueChange={handleToggleBackgroundSync}
+                            iconBg="rgba(16, 185, 129, 0.1)"
+                        />
+                    </>
+                )}
+
                 <Pressable
-                    style={[styles.actionButton, { backgroundColor: theme.surface, borderColor: 'transparent' }]}
+                    style={[styles.actionButton, { backgroundColor: theme.surface, borderColor: 'transparent', marginTop: 12 }]}
                     onPress={handleResetTracking}
                 >
                     <Feather name="refresh-cw" size={20} color={theme.primary} style={{ marginRight: 12 }} />

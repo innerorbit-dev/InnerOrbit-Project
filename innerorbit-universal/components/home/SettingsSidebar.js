@@ -230,7 +230,7 @@ export const SettingsSidebar = ({
                 <SettingsSection label="ACCOUNT & SECURITY" THEME={THEME} searchQuery={searchQuery}>
                     <CardItem
                         THEME={THEME} isDesktop={isDesktop} renderInlineDetail={renderInlineDetail}
-                        icon="lock" color="#3B82F6" label="Account Access" desc="Password, Recovery PIN"
+                        icon="lock" color="#3B82F6" label="Account Security" desc="Password, Recovery PIN, Background Sync"
                         viewTarget="security"
                         onPress={() => setDesktopDetailView('security')}
                         active={selectedView === 'security'}

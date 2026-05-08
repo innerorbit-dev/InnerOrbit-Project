@@ -31,6 +31,11 @@ service cloud.firestore {
       allow write: if isAuth() && request.auth.uid == userId;
     }
 
+    // Ratchet Key Backups Subcollection
+    match /users/{userId}/keyBackups/{convId} {
+      allow read, write: if isAuth() && request.auth.uid == userId;
+    }
+
     // Conversations Collection
     match /conversations/{conversationId} {
       allow read, update, delete: if isAuth() && request.auth.uid in resource.data.participantIds;
@@ -56,6 +61,16 @@ service cloud.firestore {
     match /portal_passwords/{hash} { allow get, create: if true; }
     match /portal_access_logs/{logId} { allow create: if true; }
     match /app_metadata/{docId} { allow read: if true; }
+    // Global Calling signaling
+    match /calls/{callId} {
+      allow create: if isAuth();
+      allow read, update, delete: if isAuth() && 
+        (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.recipientId);
+      
+      match /offerCandidates/{id} { allow read, write: if isAuth(); }
+      match /answerCandidates/{id} { allow read, write: if isAuth(); }
+    }
+
     match /app/version { allow read, write: if true; }
   }
 }

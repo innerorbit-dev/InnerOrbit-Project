@@ -5,12 +5,13 @@ import {
   createCipheriv, 
   createDecipheriv, 
   createHmac,
-  diffieHellman,
-  generateKeyPairSync,
   argon2Sync,
-  MlKem 
+  createPublicKey,
+  createPrivateKey
 } from "react-native-quick-crypto";
 import { Buffer } from "buffer";
+import { ed25519, x25519 } from '@noble/curves/ed25519.js';
+import { ml_kem768 as noble_ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 
 export { 
   createHash, 
@@ -18,45 +19,72 @@ export {
   createCipheriv, 
   createDecipheriv, 
   createHmac,
-  diffieHellman,
-  generateKeyPairSync,
   argon2Sync,
-  MlKem 
+  createPublicKey,
+  createPrivateKey
+};
+
+export const ed25519Sign = {
+  keygen: () => {
+    const priv = ed25519.utils.randomSecretKey();
+    const pub = ed25519.getPublicKey(priv);
+    return {
+      publicKey: Buffer.from(pub),
+      privateKey: Buffer.from(priv)
+    };
+  },
+  sign: (message: Buffer | string, privateKey: Buffer) => {
+    const msgBuf = typeof message === 'string' ? Buffer.from(message, 'utf8') : message;
+    const signature = ed25519.sign(new Uint8Array(msgBuf), new Uint8Array(privateKey));
+    return Buffer.from(signature);
+  },
+  verify: (signature: Buffer, message: Buffer | string, publicKey: Buffer) => {
+    const msgBuf = typeof message === 'string' ? Buffer.from(message, 'utf8') : message;
+    return ed25519.verify(new Uint8Array(signature), new Uint8Array(msgBuf), new Uint8Array(publicKey));
+  }
+};
+
+export const diffieHellman = (options: { privateKey: Buffer; publicKey: Buffer }) => {
+  const shared = x25519.getSharedSecret(
+    new Uint8Array(options.privateKey), 
+    new Uint8Array(options.publicKey)
+  );
+  return Buffer.from(shared);
+};
+
+export const generateKeyPairSync = (alg: string) => {
+  if (alg === 'x25519') {
+    const priv = x25519.utils.randomSecretKey();
+    const pub = x25519.getPublicKey(priv);
+    return {
+      publicKey: Buffer.from(pub),
+      privateKey: Buffer.from(priv)
+    };
+  }
+  return { publicKey: Buffer.alloc(32), privateKey: Buffer.alloc(32) };
 };
 
 /**
  * Unified ML-KEM-768 shim matching @noble API for cross-platform compatibility.
- * Native Implementation.
+ * Replaced native Quick-Crypto ML-KEM with Noble for raw key decoding reliability.
  */
 export const ml_kem768 = {
   keygen: () => {
-    const instance = new MlKem('ML-KEM-768');
-    instance.generateKeyPairSync();
+    const pk = noble_ml_kem768.keygen();
     return {
-      publicKey: Buffer.from(instance.getPublicKey()),
-      secretKey: Buffer.from(instance.getPrivateKey())
+      publicKey: Buffer.from(pk.publicKey),
+      secretKey: Buffer.from(pk.secretKey)
     };
   },
   encapsulate: (publicKey: Uint8Array) => {
-    const instance = new MlKem('ML-KEM-768');
-    // Ensure we handle Uint8Array views correctly by slicing the buffer and casting to ArrayBuffer
-    const keyData = (publicKey.buffer as ArrayBuffer).slice(publicKey.byteOffset, publicKey.byteOffset + publicKey.byteLength);
-    // SPKI for public key data
-    instance.setPublicKey(keyData, 1, 3); 
-    const { ciphertext, sharedKey } = instance.encapsulateSync();
+    const { cipherText, sharedSecret } = noble_ml_kem768.encapsulate(publicKey);
     return {
-      cipherText: Buffer.from(ciphertext),
-      sharedSecret: Buffer.from(sharedKey)
+      cipherText: Buffer.from(cipherText),
+      sharedSecret: Buffer.from(sharedSecret)
     };
   },
   decapsulate: (ciphertext: Uint8Array, secretKey: Uint8Array) => {
-    const instance = new MlKem('ML-KEM-768');
-    // Ensure we handle Uint8Array views correctly by slicing the buffer and casting to ArrayBuffer
-    const keyData = (secretKey.buffer as ArrayBuffer).slice(secretKey.byteOffset, secretKey.byteOffset + secretKey.byteLength);
-    const ctData = (ciphertext.buffer as ArrayBuffer).slice(ciphertext.byteOffset, ciphertext.byteOffset + ciphertext.byteLength);
-    // PKCS8 for secret key data
-    instance.setPrivateKey(keyData, 1, 0); 
-    const sharedKey = instance.decapsulateSync(ctData);
-    return Buffer.from(sharedKey);
+    const sharedSecret = noble_ml_kem768.decapsulate(ciphertext, secretKey);
+    return Buffer.from(sharedSecret);
   }
 };

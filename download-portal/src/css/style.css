@@ -41,11 +41,15 @@ html { scroll-behavior: auto; }
     --social-bg-svg: url("data:image/svg+xml,%3Csvg width='1920' height='1080' xmlns='http://www.w3.org/2000/svg'%3E%3Cg opacity='0.05' stroke='%23ffffff' stroke-width='1'%3E%3Cline x1='0' y1='20' x2='1920' y2='20' stroke-dasharray='5,5'/%3E%3Ccircle cx='500' cy='500' r='300' fill='none'/%3E%3Ccircle cx='1400' cy='600' r='400' fill='none'/%3E%3C/g%3E%3C/svg%3E");
     --features-bg-svg: url("data:image/svg+xml,%3Csvg width='1920' height='1080' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0L1920 1080M1920 0L0 1080' stroke='%23a855f7' stroke-width='2' opacity='0.05'/%3E%3Ccircle cx='960' cy='540' r='800' fill='none' stroke='%2306b6d4' stroke-width='1' opacity='0.05'/%3E%3C/svg%3E");
     
-    /* Default Sections Background Colors */
     --bg-hero-color: #1e293b;
     --bg-social-color: #0f172a;
     --bg-features-color: #1e293b;
     --bg-download-color: #0f172a;
+    
+    /* Glassmorphism Variables */
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-bg-hover: rgba(255, 255, 255, 0.07);
+    --glass-border: rgba(255, 255, 255, 0.1);
     --card-border: rgba(255, 255, 255, 0.1);
 }
 
@@ -63,9 +67,14 @@ html { scroll-behavior: auto; }
     --features-bg-svg: url("data:image/svg+xml,%3Csvg width='1920' height='1080' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0L1920 1080M1920 0L0 1080' stroke='%239333ea' stroke-width='2' opacity='0.05'/%3E%3Ccircle cx='960' cy='540' r='800' fill='none' stroke='%230284c7' stroke-width='1' opacity='0.05'/%3E%3C/svg%3E");
 
     --bg-hero-color: #f1f5f9;
-    --bg-social-color: #e2e8f0;
-    --bg-features-color: #f1f5f9;
-    --bg-download-color: #e2e8f0;
+    --bg-social-color: #ffffff;
+    --bg-features-color: #f8fafc;
+    --bg-download-color: #ffffff;
+    
+    /* Light Glassmorphism */
+    --glass-bg: rgba(255, 255, 255, 0.7);
+    --glass-bg-hover: rgba(255, 255, 255, 0.9);
+    --glass-border: rgba(0, 0, 0, 0.05);
     --card-border: rgba(0, 0, 0, 0.1);
 }
 
@@ -86,6 +95,11 @@ html { scroll-behavior: auto; }
     --bg-social-color: #000000;
     --bg-features-color: #020617;
     --bg-download-color: #000000;
+    
+    /* Dark Glassmorphism */
+    --glass-bg: rgba(15, 23, 42, 0.4);
+    --glass-bg-hover: rgba(15, 23, 42, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.05);
     --card-border: rgba(255, 255, 255, 0.05);
 }
 
@@ -196,14 +210,36 @@ body {
 }
 
 body.authenticated { visibility: visible; }
+body.authenticated #login-view { display: none !important; }
+body.authenticated #portal-view { display: block !important; opacity: 1 !important; pointer-events: all !important; }
 
 /* Shared Styles */
-.container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 24px; width: 100%; }
 .gradient-text {
     background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
+}
+
+/* Responsive Headings (Authenticated Portal) */
+body.authenticated h1 { font-size: clamp(2rem, 8vw, 5.5rem) !important; line-height: 1.1 !important; }
+body.authenticated h2 { font-size: clamp(1.8rem, 6vw, 3.5rem) !important; line-height: 1.2 !important; }
+body.authenticated h3 { font-size: clamp(1.1rem, 4vw, 1.8rem) !important; }
+body.authenticated p { font-size: clamp(0.9rem, 1.5vw, 1.2rem); }
+
+/* Responsive Grids */
+.responsive-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
+    gap: 2rem;
+}
+
+@media (max-width: 768px) {
+    .responsive-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
 }
 /* ... existing btn styles ... */
 .btn {
@@ -422,19 +458,19 @@ body.authenticated { visibility: visible; }
     
     /* Reposition Floating Cards for Mobile */
     #card-encrypted {
-        right: auto !important;
-        left: 50% !important;
-        top: 0 !important;
-        margin-left: -140px; /* Offset from center */
-        z-index: 30 !important;
+        display: none !important; /* Too much clutter on small mobile */
     }
     #card-zip {
-        right: auto !important;
-        left: 50% !important;
-        bottom: 20px !important;
-        margin-left: 60px; /* Offset from center */
-        z-index: 30 !important;
+        display: none !important;
     }
+
+    /* Stack Button Groups */
+    .hero-btns, .flex-btn-group {
+        flex-direction: column !important;
+        width: 100%;
+        gap: 1rem !important;
+    }
+    .btn { width: 100%; text-align: center; justify-content: center; }
 
     /* Navbar Responsive Switching */
     .desktop-nav { display: none !important; }
@@ -472,7 +508,11 @@ body.authenticated { visibility: visible; }
 
 /* Foldable & Flip Phone Optimizations */
 @media (max-width: 480px) {
-    .container { padding: 0 16px; }
+    .container { 
+        padding: 0 16px !important;
+        margin: 0 auto !important;
+        width: 100% !important;
+    }
     h1 { font-size: 2.2rem !important; margin-bottom: 1rem !important; }
     h2 { font-size: 1.8rem !important; }
     

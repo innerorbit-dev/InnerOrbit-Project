@@ -191,6 +191,138 @@ export async function updateUserProfile(uid, updates) {
   }
 }
 
+/**
+ * Publishes this user's X25519 DH public key to their Firestore profile.
+ * Called on login via ratchet-key-service.publishMyKeysOnLogin().
+ * Other users fetch this key to initialize v4 Double Ratchet sessions.
+ *
+ * @param {string} uid - Firebase UID of the current user
+ * @param {string} dhPublicKeyBase64 - Base64-encoded X25519 public key
+ */
+export async function publishDhPublicKey(uid, dhPublicKeyBase64) {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    await setDoc(userRef, { dhPublicKey: dhPublicKeyBase64 }, { merge: true });
+    Logger.log(`[Firestore] ✅ DH public key published for ${uid.substring(0, 5)}...`);
+  } catch (error) {
+    Logger.error("Error publishing DH public key:", error);
+    throw error;
+  }
+}
+
+/**
+ * Publishes this user's v6 public keys (DH + ML-KEM-768) to their Firestore profile.
+ * Called on login via ratchet-key-service.publishMyKeysOnLogin().
+ *
+ * @param {string} uid - Firebase UID of the current user
+ * @param {string} dhPublicKey - Base64-encoded X25519 public key
+ * @param {string} pqcPublicKey - Base64-encoded ML-KEM-768 public key
+ * @param {string} identityPublicKey - Base64-encoded Ed25519 public key
+ * @param {string} capabilitiesSignature - Base64-encoded digital signature
+ */
+export async function publishV6PublicKeys(uid, dhPublicKey, pqcPublicKey, identityPublicKey, capabilitiesSignature) {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    await setDoc(userRef, { 
+      v6PublicKeys: {
+        dh: dhPublicKey,
+        pqc: pqcPublicKey,
+        identity: identityPublicKey,
+        signature: capabilitiesSignature,
+        updatedAt: serverTimestamp()
+      }
+    }, { merge: true });
+    Logger.log(`[Firestore] ✅ v6 PQC public keys published for ${uid.substring(0, 5)}...`);
+  } catch (error) {
+    Logger.error("Error publishing v6 public keys:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetches a user's X25519 DH public key from Firestore.
+ * Called by ratchet-key-service.initializeRatchetIfNeeded() when opening a chat.
+ *
+ * @param {string} uid - Firebase UID of the target user
+ * @returns {string|null} Base64-encoded public key, or null if not published yet
+ */
+export async function fetchDhPublicKey(uid) {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    const snap = await getDoc(userRef);
+    if (snap.exists() && snap.data().dhPublicKey) {
+      return snap.data().dhPublicKey;
+    }
+    return null;
+  } catch (error) {
+    Logger.error("Error fetching DH public key:", error);
+    return null;
+  }
+}
+
+/**
+ * Fetches a user's v6 public keys from Firestore.
+ *
+ * @param {string} uid - Firebase UID of the target user
+ * @returns {object|null} Object { dh, pqc, identity, signature }, or null if not published
+ */
+export async function fetchV6PublicKeys(uid) {
+  try {
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    const snap = await getDoc(userRef);
+    if (snap.exists() && snap.data().v6PublicKeys) {
+      return snap.data().v6PublicKeys;
+    }
+    return null;
+  } catch (error) {
+    Logger.error("Error fetching v6 public keys:", error);
+    return null;
+  }
+}
+
+/**
+ * Saves an encrypted ratchet session backup for cross-device recovery.
+ * Stored at: users/{uid}/keyBackups/{convId}
+ * The value is an AES-GCM ciphertext encrypted with the user's PIN-derived key —
+ * the server cannot read it.
+ *
+ * @param {string} uid     - Firebase UID of the current user
+ * @param {string} convId  - Conversation document ID
+ * @param {string} encryptedB64 - Base64 AES-GCM ciphertext of the ratchet shared secret
+ */
+export async function saveKeyBackup(uid, convId, encryptedB64) {
+  try {
+    const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", convId);
+    await setDoc(backupRef, {
+      encryptedSecret: encryptedB64,
+      updatedAt: serverTimestamp(),
+    });
+    Logger.log(`[Firestore] ✅ Key backup saved for conv=${convId.substring(0, 8)}`);
+  } catch (error) {
+    Logger.error("Error saving key backup:", error);
+  }
+}
+
+/**
+ * Fetches an encrypted ratchet session backup from Firestore.
+ *
+ * @param {string} uid    - Firebase UID of the current user
+ * @param {string} convId - Conversation document ID
+ * @returns {string|null} Base64 AES-GCM ciphertext, or null if not found
+ */
+export async function fetchKeyBackup(uid, convId) {
+  try {
+    const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", convId);
+    const snap = await getDoc(backupRef);
+    if (snap.exists() && snap.data().encryptedSecret) {
+      return snap.data().encryptedSecret;
+    }
+    return null;
+  } catch (error) {
+    Logger.error("Error fetching key backup:", error);
+    return null;
+  }
+}
 
 /**
  * Deletes a user profile (Account Deletion)
@@ -563,6 +695,11 @@ export function subscribeToMessages(conversationId, callback) {
  * @returns Unsubscribe function
  */
 export function subscribeToConversations(userId, callback, onError) {
+  if (!userId) {
+    // Return a no-op unsubscribe if called before auth is ready
+    Logger.warn("[Firestore] subscribeToConversations called without userId — skipping.");
+    return () => {};
+  }
   try {
     const q = query(
       collection(db, CONVERSATIONS_COLLECTION),
@@ -574,9 +711,13 @@ export function subscribeToConversations(userId, callback, onError) {
         id: doc.id,
         ...doc.data(),
       }));
-
       callback(conversations);
     }, (error) => {
+      // Ignore permission-denied — happens transiently while Firebase auth token propagates
+      if (error?.code === "permission-denied") {
+        Logger.warn("[Firestore] subscribeToConversations: permission-denied (auth token still propagating — will retry on next mount).");
+        return; // Silently swallow; caller can retry by re-mounting once user is confirmed
+      }
       Logger.error("Firestore subscription error:", error);
       if (onError) onError(error);
     });
@@ -631,6 +772,7 @@ export function subscribeToContactNicknames(userId, callback) {
  */
 export async function clearChatData(conversationId, deleteMedia = false) {
   try {
+    Logger.log(`[Firestore] Clearing chat data for conv=${conversationId} deleteMedia=${deleteMedia}`);
     // 1. Get all messages
     const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
     const snap = await getDocs(messagesRef);
@@ -638,27 +780,101 @@ export async function clearChatData(conversationId, deleteMedia = false) {
     // 2. Delete all message documents in Firestore
     const deletePromises = snap.docs.map(mDoc => deleteDoc(doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, mDoc.id)));
     await Promise.all(deletePromises);
+    Logger.log(`[Firestore] ✅ Deleted ${snap.docs.length} messages from Firestore.`);
 
     // 3. Optionally delete all media in Storage for this conversation
     if (deleteMedia) {
-      const folderRef = storageRefFn(storage, `chats/${conversationId}`);
-      const listRes = await listAll(folderRef);
-      const storageDeletes = listRes.items.map(item => deleteObject(item));
-      await Promise.all(storageDeletes);
+      // ⚠️ Firebase Storage listAll() is blocked by CORS on web (localhost and web deployments).
+      // Skip storage cleanup on web — media files become inaccessible once their Firestore
+      // messages are deleted. On mobile/native, proceed normally.
+      const isWebEnv = typeof document !== 'undefined';
+      if (isWebEnv) {
+        Logger.warn(`[Storage] Skipping media cleanup on web (CORS restriction). Files will be orphaned but inaccessible.`);
+      } else {
+        try {
+          const folderRef = storageRefFn(storage, `chats/${conversationId}`);
+          let listRes;
+          try {
+            listRes = await listAll(folderRef);
+          } catch (listErr) {
+            // Folder may not exist or Storage rules may deny listing — not a fatal error
+            Logger.warn(`[Storage] Could not list media for ${conversationId} (folder may not exist or access denied): ${listErr?.message}`);
+            listRes = { items: [] };
+          }
+
+          if (listRes.items.length > 0) {
+            const storageDeletes = listRes.items.map(async (item) => {
+              try {
+                await deleteObject(item);
+              } catch (err) {
+                Logger.warn(`[Storage] Failed to delete item ${item.fullPath}: ${err?.message}`);
+              }
+            });
+            await Promise.all(storageDeletes);
+            Logger.log(`[Storage] ✅ Deleted ${listRes.items.length} media items.`);
+          } else {
+            Logger.log(`[Storage] No media items found to delete for ${conversationId}.`);
+          }
+        } catch (storageError) {
+          Logger.warn(`[Storage] Media cleanup skipped due to error: ${storageError?.message}`);
+          // Non-fatal — Firestore messages are already deleted
+        }
+      }
     }
 
-    // 4. Update conversation's last message
+    // 4. Update conversation's last message and metadata
     const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
-    await setDoc(convRef, {
-      lastMessage: "Chat cleared",
+    const convSnap = await getDoc(convRef);
+    const updates = {
+      lastMessage: "",
       lastMessageTime: serverTimestamp(),
       lastMessageId: "",
-      lastMessageStatus: ""
-    }, { merge: true });
+      lastMessageStatus: "",
+      lastMessageSenderId: "",
+    };
 
+    // Also clear any versioning or sender-specific flags that might confuse the UI
+    if (convSnap.exists()) {
+      const data = convSnap.data();
+      // Remove versioning flag if it exists
+      if (data.lastMessageEncVersion) {
+        updates.lastMessageEncVersion = "";
+      }
+      // Reset unread counts for all participants
+      if (data.participantIds) {
+        data.participantIds.forEach(uid => {
+          updates[`unreadCount_${uid}`] = 0;
+        });
+      }
+    }
+
+    await updateDoc(convRef, updates);
+    Logger.log(`[Firestore] ✅ Conversation metadata cleared for ${conversationId.substring(0, 5)}...`);
+    
     return true;
   } catch (error) {
-    Logger.error("Error clearing chat data:", error);
+    Logger.error("[Firestore] ❌ Error clearing chat data:", error);
+    throw error;
+  }
+}
+
+/**
+ * Hides all current messages for the current user only by setting a clearedAt timestamp.
+ */
+export async function clearChatForMe(conversationId, userId) {
+  try {
+    const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+    const clearedAtField = `clearedAt_${userId}`;
+    
+    await updateDoc(convRef, {
+      [clearedAtField]: Timestamp.now(),
+      [`unreadCount_${userId}`]: 0 // Also reset their unread count
+    });
+    
+    Logger.log(`[Firestore] ✅ Chat cleared FOR ME (${userId.substring(0, 5)}...) in conv ${conversationId.substring(0, 5)}...`);
+    return true;
+  } catch (error) {
+    Logger.error("[Firestore] Error clearing chat for me:", error);
     throw error;
   }
 }
@@ -983,6 +1199,58 @@ export async function resetUnreadCount(conversationId, userId) {
   } catch (error) {
     // Ignore if document doesn't exist or field is missing
     Logger.warn(`[Firestore] Failed to reset unread count: ${error.message}`);
+  }
+}
+
+/**
+ * Saves an encrypted account-level key backup (Identity/DH/PQC keys)
+ * @param uid - User UID
+ * @param backupData - Object containing encrypted key blobs
+ */
+export async function saveAccountKeyBackup(uid, backupData) {
+  try {
+    const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", "account_identity");
+    await setDoc(backupRef, {
+      ...backupData,
+      updatedAt: serverTimestamp()
+    });
+    Logger.log(`[Firestore] ✅ Account key backup saved for ${uid.substring(0, 5)}...`);
+  } catch (error) {
+    Logger.error("Error saving account key backup:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetches the user's encrypted account-level key backup
+ * @param uid - User UID
+ * @returns Backup data or null
+ */
+export async function fetchAccountKeyBackup(uid) {
+  try {
+    const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", "account_identity");
+    const snap = await getDoc(backupRef);
+    if (snap.exists()) {
+      return snap.data();
+    }
+    return null;
+  } catch (error) {
+    Logger.error("Error fetching account key backup:", error);
+    return null;
+  }
+}
+
+/**
+ * Updates the stealth mode of a conversation (persistence bypass)
+ */
+export async function updateConversationStealthMode(conversationId, isStealth) {
+  try {
+    const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
+    await updateDoc(convRef, { isStealth });
+    Logger.log(`[Firestore] ✅ Stealth Mode updated to ${isStealth} for conv: ${conversationId.substring(0, 5)}...`);
+  } catch (error) {
+    Logger.error("Error updating stealth mode:", error);
+    throw error;
   }
 }
 

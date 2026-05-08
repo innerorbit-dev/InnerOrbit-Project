@@ -32,3 +32,54 @@ jest.mock('@noble/post-quantum/ml-kem.js', () => ({
         decapsulate: jest.fn(() => new Uint8Array(32)),
     },
 }));
+
+// Mock react-native-quick-crypto globally — prevents react-native-nitro-modules crash in Node/Jest
+jest.mock('react-native-quick-crypto', () => {
+    const crypto = require('crypto');
+    return {
+        ...crypto,
+        randomBytes: (n) => crypto.randomBytes(n),
+        createHash: (alg) => crypto.createHash(alg),
+        createHmac: (alg, key) => crypto.createHmac(alg, key),
+        pbkdf2Sync: (p, s, i, k, a) => crypto.pbkdf2Sync(p, s, i, k, a),
+        generateKeyPairSync: () => ({
+            publicKey: Buffer.alloc(32, 0x01),
+            privateKey: Buffer.alloc(32, 0x02),
+        }),
+        diffieHellman: () => Buffer.alloc(32, 0x42),
+        argon2Sync: (alg, options) => {
+            const hash = crypto.createHash('sha256')
+                .update(options.message)
+                .update(options.nonce)
+                .digest();
+            return hash.subarray(0, options.tagLength || 32);
+        },
+        createCipheriv: (alg, key, iv) => {
+            const cipher = crypto.createCipheriv(alg, key, iv);
+            return {
+                update: (data, ie, oe) => cipher.update(data, ie, oe),
+                final: (oe) => cipher.final(oe),
+                getAuthTag: () => cipher.getAuthTag(),
+                setAuthTag: (t) => cipher.setAuthTag(t),
+            };
+        },
+        createDecipheriv: (alg, key, iv) => {
+            const decipher = crypto.createDecipheriv(alg, key, iv);
+            return {
+                update: (data, ie, oe) => decipher.update(data, ie, oe),
+                final: (oe) => decipher.final(oe),
+                setAuthTag: (t) => decipher.setAuthTag(t),
+            };
+        },
+        MlKem: class {
+            constructor(type) {}
+            generateKeyPairSync() {}
+            getPublicKey() { return new Uint8Array(1184); }
+            getPrivateKey() { return new Uint8Array(2400); }
+            setPublicKey() {}
+            setPrivateKey() {}
+            encapsulateSync() { return { ciphertext: new Uint8Array(1088), sharedKey: new Uint8Array(32).fill(0x42) }; }
+            decapsulateSync() { return new Uint8Array(32).fill(0x42); }
+        },
+    };
+});

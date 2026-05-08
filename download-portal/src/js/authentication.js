@@ -55,10 +55,31 @@
             document.addEventListener('DOMContentLoaded', () => {
                 document.body.classList.add('authenticated');
                 document.body.style.visibility = 'visible';
+                
+                // CRITICAL: Hide login view if already authenticated
+                const loginView = document.getElementById('login-view');
+                if (loginView) loginView.style.display = 'none';
+                
+                const portalView = document.getElementById('portal-view');
+                if (portalView) {
+                    portalView.style.display = 'block';
+                    portalView.style.opacity = '1';
+                    portalView.style.pointerEvents = 'all';
+                }
             });
         } else {
             document.body.classList.add('authenticated');
             document.body.style.visibility = 'visible';
+            
+            const loginView = document.getElementById('login-view');
+            if (loginView) loginView.style.display = 'none';
+            
+            const portalView = document.getElementById('portal-view');
+            if (portalView) {
+                portalView.style.display = 'block';
+                portalView.style.opacity = '1';
+                portalView.style.pointerEvents = 'all';
+            }
         }
 
         return true;

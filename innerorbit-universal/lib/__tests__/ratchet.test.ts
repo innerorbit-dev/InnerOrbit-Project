@@ -1,5 +1,4 @@
 import { initializeRatchet, ratchetEncrypt, ratchetDecrypt } from "../ratchet";
-const crypto = require("crypto");
 
 // Mock @noble/post-quantum/ml-kem
 jest.mock("@noble/post-quantum/ml-kem.js", () => {
@@ -24,7 +23,7 @@ describe("Double Ratchet Implementation", () => {
     let aliceState: any;
     let bobState: any;
     const sharedSecret = Buffer.from("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "hex");
-    
+
     const aliceDh = {
         publicKey: Buffer.alloc(32, 0x22) as any,
         privateKey: Buffer.alloc(32, 0x33) as any
@@ -39,33 +38,33 @@ describe("Double Ratchet Implementation", () => {
         bobState = await initializeRatchet(false, sharedSecret as any, aliceDh.publicKey, bobDh);
     });
 
-    it("should encrypt and decrypt messages between Alice and Bob", () => {
+    it("should encrypt and decrypt messages between Alice and Bob", async () => {
         const message = "Hello Bob, this is Alice!";
-        const { ciphertext, header } = ratchetEncrypt(aliceState, message);
-        
-        const decrypted = ratchetDecrypt(bobState, ciphertext, header);
+        const { ciphertext, header } = await ratchetEncrypt(aliceState, message);
+
+        const decrypted = await ratchetDecrypt(bobState, ciphertext, header);
         expect(decrypted).toBe(message);
     });
 
-    it("should handle multiple messages in a row", () => {
+    it("should handle multiple messages in a row", async () => {
         const messages = ["Msg 1", "Msg 2", "Msg 3"];
         for (const msg of messages) {
-            const { ciphertext, header } = ratchetEncrypt(aliceState, msg);
-            const decrypted = ratchetDecrypt(bobState, ciphertext, header);
+            const { ciphertext, header } = await ratchetEncrypt(aliceState, msg);
+            const decrypted = await ratchetDecrypt(bobState, ciphertext, header);
             expect(decrypted).toBe(msg);
         }
     });
 
-    it("should handle out-of-order messages", () => {
-        const msg1 = ratchetEncrypt(aliceState, "First");
-        const msg2 = ratchetEncrypt(aliceState, "Second");
-        
+    it("should handle out-of-order messages", async () => {
+        const msg1 = await ratchetEncrypt(aliceState, "First");
+        const msg2 = await ratchetEncrypt(aliceState, "Second");
+
         // Bob receives second message first
-        const decrypted2 = ratchetDecrypt(bobState, msg2.ciphertext, msg2.header);
+        const decrypted2 = await ratchetDecrypt(bobState, msg2.ciphertext, msg2.header);
         expect(decrypted2).toBe("Second");
-        
+
         // Bob receives first message later
-        const decrypted1 = ratchetDecrypt(bobState, msg1.ciphertext, msg1.header);
+        const decrypted1 = await ratchetDecrypt(bobState, msg1.ciphertext, msg1.header);
         expect(decrypted1).toBe("First");
     });
 
@@ -87,17 +86,15 @@ describe("Double Ratchet Implementation", () => {
         });
 
         // Alice sends PQ message
-        const { ciphertext, header } = ratchetEncrypt(alicePQState, "PQ Hello");
+        const { ciphertext, header } = await ratchetEncrypt(alicePQState, "PQ Hello");
         expect(header.pqcPk).toBeDefined();
 
-        const decrypted = ratchetDecrypt(bobPQState, ciphertext, header);
+        const decrypted = await ratchetDecrypt(bobPQState, ciphertext, header);
         expect(decrypted).toBe("PQ Hello");
 
         // Bob responds (triggers DH Ratchet)
-        const bobMsg = ratchetEncrypt(bobPQState, "PQ Response");
-        // Bob's header might have a new DH key if we forced one, but here Alice hasn't rotated yet.
-        // In this simple test, we just check they still talk.
-        const aliceDecracted = ratchetDecrypt(alicePQState, bobMsg.ciphertext, bobMsg.header);
-        expect(aliceDecracted).toBe("PQ Response");
+        const bobMsg = await ratchetEncrypt(bobPQState, "PQ Response");
+        const aliceDecrypted = await ratchetDecrypt(alicePQState, bobMsg.ciphertext, bobMsg.header);
+        expect(aliceDecrypted).toBe("PQ Response");
     });
 });

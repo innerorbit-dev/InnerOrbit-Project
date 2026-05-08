@@ -107,6 +107,15 @@ export const MobileSettingsOverlay = ({
             biometricsSupported={security.biometricsSupported}
             screenshotsBlocked={security.screenshotsBlocked}
             handleToggleScreenshots={security.handleToggleScreenshots}
+            hardwareLockEnabled={security.hardwareLockEnabled}
+            hardwareSupported={security.hardwareSupported}
+            handleToggleHardwareLock={security.handleToggleHardwareLock}
+            autoRecoveryEnabled={security.autoRecoveryEnabled}
+            handleToggleAutoRecovery={security.handleToggleAutoRecovery}
+            backgroundSyncEnabled={security.backgroundSyncEnabled}
+            handleToggleBackgroundSync={security.handleToggleBackgroundSync}
+            keyBackupEnabled={security.keyBackupEnabled}
+            handleToggleKeyBackup={security.handleToggleKeyBackup}
           />
         );
       case 'privacy':

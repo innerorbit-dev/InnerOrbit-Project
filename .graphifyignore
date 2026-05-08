@@ -1,0 +1,22 @@
+# Dependency / System folders
+java-17/
+node_modules/
+.venv/
+.git/
+.idea/
+.vscode/
+dist/
+build/
+coverage/
+
+# Legacy / Large non-essential folders
+archive/
+oracle-server-backend/scripts/
+innerorbit-universal/coverage/
+innerorbit-universal/android/
+innerorbit-universal/ios/
+download-portal/src/js/vendor/
+download-portal-react/node_modules/
+**/lcov-report/
+**/*.test.js.html
+graphify-out/

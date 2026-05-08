@@ -1,9 +1,10 @@
 /** Purpose: UI component for individual chat message bubbles with theme support. */
-import React, { useRef, useEffect, memo } from "react";
-import { View, Text, Pressable, Image, Animated, PanResponder, StyleSheet, Alert } from "react-native";
+import React, { useRef, useEffect, useState, memo } from "react";
+import { View, Text, Pressable, Image, Animated, PanResponder, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import { select, isWeb } from "../../utils/platform";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Clipboard from 'expo-clipboard';
+import { MediaVaultService } from "../../lib/media-vault-service";
 
 const ACCOUNT_IMG = require('../../assets/account.webp');
 
@@ -53,6 +54,60 @@ const ReactionPill = ({ emoji, count, theme, isOwn }) => {
     );
 };
 
+const VaultMediaRenderer = ({ vaultId, theme, isOwn }) => {
+    const [decryptedUri, setDecryptedUri] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(false);
+
+    useEffect(() => {
+        let isMounted = true;
+        const decryptMedia = async () => {
+            try {
+                const uri = await MediaVaultService.downloadMedia(vaultId);
+                if (isMounted) {
+                    setDecryptedUri(uri);
+                    setLoading(false);
+                }
+            } catch (err) {
+                console.error("[VaultRenderer] Decryption failed:", err);
+                if (isMounted) {
+                    setError(true);
+                    setLoading(false);
+                }
+            }
+        };
+        decryptMedia();
+        return () => { isMounted = false; };
+    }, [vaultId]);
+
+    if (loading) {
+        return (
+            <View style={{ width: 200, height: 200, backgroundColor: 'rgba(0,0,0,0.05)', justifyContent: 'center', alignItems: 'center', borderRadius: 12 }}>
+                <ActivityIndicator color={isOwn ? '#fff' : theme.primary} />
+                <Text style={{ color: isOwn ? '#fff' : theme.textSecondary, fontSize: 10, marginTop: 8, opacity: 0.7 }}>Unlocking Vault...</Text>
+            </View>
+        );
+    }
+
+    if (error) {
+        return (
+            <View style={{ width: 200, height: 200, backgroundColor: 'rgba(239, 68, 68, 0.1)', justifyContent: 'center', alignItems: 'center', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+                <Feather name="shield-off" size={24} color="#EF4444" />
+                <Text style={{ color: '#EF4444', fontSize: 10, marginTop: 8 }}>Vault Access Denied</Text>
+            </View>
+        );
+    }
+
+    return (
+        <View style={{ width: 200, height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 2 }}>
+            <Image source={{ uri: decryptedUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 8 }}>
+                <Feather name="shield" size={12} color="#10B981" />
+            </View>
+        </View>
+    );
+};
+
 const MessageBubble = ({
     item,
     userUid,
@@ -67,7 +122,10 @@ const MessageBubble = ({
     onAddReaction,
     onDelete,
     conversationId,
-    displayName
+    displayName,
+    isSelectionMode = false,
+    isSelected = false,
+    onSelectToggle = () => {}
 }) => {
     if (item.hiddenFor && userUid && item.hiddenFor.includes(userUid)) return null;
 
@@ -137,7 +195,35 @@ const MessageBubble = ({
                 marginRight: isOwnMessage ? 0 : 28,
                 paddingLeft: isOwnMessage ? 0 : 0,
             }
-        ]} {...panResponder.panHandlers}>
+        ]} 
+        {...(!isSelectionMode ? panResponder.panHandlers : {})}
+        >
+            {/* Selection Checkbox */}
+            {isSelectionMode && (
+                <Pressable 
+                    onPress={onSelectToggle}
+                    style={{
+                        padding: 10,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 10
+                    }}
+                >
+                    <View style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: 12,
+                        borderWidth: 2,
+                        borderColor: isSelected ? theme.primary : theme.textSecondary,
+                        backgroundColor: isSelected ? theme.primary : 'transparent',
+                        justifyContent: 'center',
+                        alignItems: 'center'
+                    }}>
+                        {isSelected && <Feather name="check" size={16} color="#000" />}
+                    </View>
+                </Pressable>
+            )}
+
             {/* Reply hint icon */}
             <Animated.View style={{
                 position: 'absolute',
@@ -168,8 +254,9 @@ const MessageBubble = ({
                 }
             ]}>
                 <Pressable
-                    onLongPress={(e) => onLongPress(item, e)}
-                    onContextMenu={(e) => onRightClick(item, e)}
+                    onPress={isSelectionMode ? onSelectToggle : undefined}
+                    onLongPress={!isSelectionMode ? (e) => onLongPress(item, e) : undefined}
+                    onContextMenu={!isSelectionMode ? (e) => onRightClick(item, e) : undefined}
                     delayLongPress={200}
                     style={({ pressed }) => [
                         styles.bubble,
@@ -223,19 +310,24 @@ const MessageBubble = ({
                         <View style={{ width: 200, height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 2 }}>
                             <Image source={{ uri: item.encryptedText }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                         </View>
+                    ) : item.type === 'vault_media' ? (
+                        <VaultMediaRenderer vaultId={item.encryptedText} theme={theme} isOwn={isOwnMessage} />
                     ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
                             <Text style={[
                                 styles.messageText,
                                 {
                                     color: isOwnMessage ? ownText : receivedText,
-                                    fontStyle: isDeleted ? 'italic' : 'normal',
+                                    fontStyle: isDeleted ? 'italic' : (item.encryptedText && (item.encryptedText.includes('"dh":') || item.encryptedText.includes('"pqcPk":')) ? 'italic' : 'normal'),
                                     opacity: isDeleted ? 0.6 : 1,
                                     marginRight: 4,
                                     flexShrink: 1
                                 }
                             ]}>
-                                {isDeleted ? "🚫 Message deleted" : item.encryptedText}
+                                {isDeleted ? "🚫 Message deleted" : 
+                                 (item.encryptedText && (item.encryptedText.includes('"dh":') || item.encryptedText.includes('"pqcPk":'))) ? 
+                                 "🛡️ Initializing Quantum-Safe session..." : 
+                                 item.encryptedText}
                                 {item.isEdited && !isDeleted &&
                                     <Text style={{ fontSize: 10, opacity: 0.6 }}> · edited</Text>
                                 }
@@ -393,6 +485,8 @@ export default memo(MessageBubble, (prevProps, nextProps) => {
         prevProps.item.isDeleted === nextProps.item.isDeleted &&
         prevProps.item.reactions === nextProps.item.reactions &&
         prevProps.activeMenuId === nextProps.activeMenuId &&
-        prevProps.theme === nextProps.theme
+        prevProps.theme === nextProps.theme &&
+        prevProps.isSelectionMode === nextProps.isSelectionMode &&
+        prevProps.isSelected === nextProps.isSelected
     );
 });

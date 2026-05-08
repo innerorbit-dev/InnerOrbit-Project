@@ -136,6 +136,14 @@ export default function LoginScreen() {
       setGoogleLoading(true);
       setIsTransitioning(true);
       await signInWithGoogleCredential(idToken, loginMode === 'email' ? saveEmailLoginChecked : savePinLoginChecked);
+
+      const { auth } = await import("../lib/firebase");
+      const currentUid = auth.currentUser?.uid;
+      if (currentUid) {
+        const { publishMyKeysOnLogin } = await import("../lib/ratchet-key-service");
+        publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
+      }
+
       // Navigation is handled by _layout.js auth listener to prevent double-navigation
     } catch (error) {
       setIsTransitioning(false);
@@ -592,6 +600,10 @@ export default function LoginScreen() {
 
       if (currentUid) {
         try {
+          // Initialize/Publish Ratchet Keys (Invisible v4 Handshake)
+          const { publishMyKeysOnLogin } = await import("../lib/ratchet-key-service");
+          publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
+
           let userProfile = await getUserProfile(currentUid);
 
           // SELF-HEALING: If profile is missing or incomplete (glitch during signup), fix it now.
@@ -692,6 +704,14 @@ export default function LoginScreen() {
       setIsDecoyMode(false);
 
       await signIn(userId, pin, true, savePinLoginChecked);
+
+      const { auth } = await import("../lib/firebase");
+      const currentUid = auth.currentUser?.uid;
+      if (currentUid) {
+        const { publishMyKeysOnLogin } = await import("../lib/ratchet-key-service");
+        publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
+      }
+
       router.replace("/home");
     } catch (error) {
       showError(error);
@@ -706,6 +726,14 @@ export default function LoginScreen() {
         setGoogleLoading(true);
         setIsTransitioning(true);
         await signInWithGoogle(loginMode === 'email' ? saveEmailLoginChecked : savePinLoginChecked);
+
+        const { auth } = await import("../lib/firebase");
+        const currentUid = auth.currentUser?.uid;
+        if (currentUid) {
+          const { publishMyKeysOnLogin } = await import("../lib/ratchet-key-service");
+          publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
+        }
+
         // REMOVED: router.push("/home") 
         // We rely on the auth state listener in _layout.js to handle the transition smoothly.
       } catch (error) {

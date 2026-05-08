@@ -1,16 +1,6 @@
-// Firebase Configuration (Using reserved hosting URLs or manual config)
-// For local development, we use a placeholder that matches your firebaserc
-const firebaseConfig = {
-    apiKey: "AIzaSyBZIRJuQ4Ltn_c8ciqykG5KUvHXSFzTy_w",
-    authDomain: "innerorbit-portal.firebaseapp.com",
-    projectId: "innerorbit-portal",
-    storageBucket: "innerorbit-portal.firebasestorage.app",
-    messagingSenderId: "616184841875",
-    appId: "1:616184841875:web:133ebb0b367f983e2d6f66",
-    measurementId: "G-FRBP7HBBGD"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+// Firebase Configuration & Initialization
+// Config is now managed centrally in js/firebase-config.js
+var db = window.db;
 
 // --- REACT LOGIC ---
 const { useState, useEffect, useLayoutEffect, useRef } = React;
@@ -21,14 +11,14 @@ gsap.registerPlugin(ScrollTrigger);
 // --- STYLES & UTILS ---
 const styles = {
     glass: {
-        background: 'rgba(255, 255, 255, 0.03)',
+        background: 'var(--glass-bg)',
         backdropFilter: 'blur(16px)',
-        border: '1px solid rgba(255, 255, 255, 0.05)',
+        border: '1px solid var(--glass-border)',
         boxShadow: '0 4px 30px rgba(0, 0, 0, 0.1)',
     },
     glassHover: {
-        background: 'rgba(255, 255, 255, 0.07)',
-        borderColor: 'rgba(6, 182, 212, 0.3)',
+        background: 'var(--glass-bg-hover)',
+        borderColor: 'var(--accent-cyan)',
         transform: 'translateY(-5px)',
         boxShadow: '0 20px 40px rgba(0,0,0,0.4)'
     },
@@ -101,16 +91,17 @@ const Navbar = () => {
         <a href={href}
             onClick={() => mobile && setMenuOpen(false)}
             style={{
-                color: mobile ? 'white' : 'rgba(255,255,255,0.8)',
+                color: 'var(--text-primary)',
+                opacity: mobile ? 1 : 0.8,
                 textDecoration: 'none',
                 fontSize: mobile ? '1.5rem' : '0.95rem',
                 fontWeight: 500,
-                transition: 'color 0.2s',
+                transition: 'all 0.2s',
                 padding: mobile ? '10px 0' : '0',
                 display: 'block'
             }}
-            onMouseOver={e => e.target.style.color = 'white'}
-            onMouseOut={e => e.target.style.color = mobile ? 'white' : 'rgba(255,255,255,0.8)'}
+            onMouseOver={e => e.target.style.opacity = '1'}
+            onMouseOut={e => e.target.style.opacity = mobile ? '1' : '0.8'}
         >
             {children}
         </a>
@@ -133,17 +124,27 @@ const Navbar = () => {
             <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 {/* Logo */}
                 <div style={{
-                    fontSize: '1.5rem',
+                    fontSize: 'clamp(1.1rem, 4vw, 1.5rem)',
                     fontWeight: 700,
-                    color: 'white',
+                    color: 'var(--text-primary)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '12px',
+                    gap: '10px',
                     letterSpacing: '-0.02em',
-                    zIndex: 1002
+                    zIndex: 1002,
+                    marginRight: '15px'
                 }}>
-                    <div className="nav-logo-container" aria-label="InnerOrbit Logo"></div>
-                    <span>InnerOrbit</span>
+                    <div id="nav-logo-landing-pad" style={{ 
+                        width: '32px', 
+                        height: '32px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        opacity: 0 // Hidden until animated logo 'lands'
+                    }}>
+                        <img src="assets/InnerOrbit-Logo.webp" alt="InnerOrbit Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                    </div>
+                    <span style={{ whiteSpace: 'nowrap' }}>InnerOrbit</span>
                 </div>
 
                 {/* Desktop Links */}
@@ -291,7 +292,7 @@ const HeroSection = () => {
                             animation: 'gradientShift 5s ease infinite'
                         }}>Social Privacy.</span>
                     </h1>
-                    <p style={{ fontSize: '1.3rem', color: '#94a3b8', lineHeight: 1.7, marginBottom: '2rem', maxWidth: '800px', margin: '0 auto 2rem' }}>
+                    <p style={{ fontSize: '1.3rem', color: 'var(--text-secondary)', lineHeight: 1.7, marginBottom: '2rem', maxWidth: '800px', margin: '0 auto 2rem' }}>
                         More than just encryption. Control who sees what with 5 levels of social stealth—from casual chats to complete invisibility.
                     </p>
 
@@ -341,7 +342,7 @@ const HeroSection = () => {
                         }
                     `}</style>
 
-                    <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
+                    <div className="flex-btn-group" style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
                         <a href="#download" className="btn" style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '1.1rem', padding: '16px 32px' }}>
                             Download App
                         </a>
@@ -397,7 +398,7 @@ const SocialPrivacyComparison = () => {
         <section id="social-privacy" className="bg-social" style={{ padding: '8rem 0', position: 'relative' }}>
             <div className="container">
                 <div style={{ textAlign: 'center', marginBottom: '5rem' }}>
-                    <h2 style={{ fontSize: '3rem', fontWeight: 800, marginBottom: '1.5rem' }}>
+                    <h2 style={{ fontWeight: 800, marginBottom: '1.5rem' }}>
                         Social Privacy vs. <span style={{ color: '#64748b' }}>Normal Apps</span>
                     </h2>
                     <p style={{ color: '#64748b', fontSize: '1.2rem', maxWidth: '700px', margin: '0 auto' }}>
@@ -405,17 +406,14 @@ const SocialPrivacyComparison = () => {
                     </p>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', maxWidth: '1000px', margin: '0 auto' }}>
+                <div className="responsive-grid" style={{ maxWidth: '1000px', margin: '0 auto' }}>
                     {/* Standard Apps Card */}
-                    <div className="comparison-card" style={{
-                        padding: '3rem', borderRadius: '24px',
-                        border: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.02)'
-                    }}>
-                        <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '2rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="comparison-card" style={styles.glass}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '2rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '12px' }}>
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                             Normal Apps
                         </div>
-                        <ul style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', color: '#64748b' }}>
+                        <ul style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', color: 'var(--text-secondary)' }}>
                             <li style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                                 <span style={{ color: '#ef4444' }}>✕</span> Visible notifications on lock screen
                             </li>
@@ -433,31 +431,31 @@ const SocialPrivacyComparison = () => {
 
                     {/* InnerOrbit Card */}
                     <div className="comparison-card" style={{
-                        padding: '3rem', borderRadius: '24px',
-                        position: 'relative', overflow: 'hidden',
-                        border: '1px solid rgba(6, 182, 212, 0.2)', background: 'rgba(6, 182, 212, 0.05)'
+                        ...styles.glass,
+                        border: '1px solid var(--accent-cyan)',
+                        background: 'rgba(6, 182, 212, 0.05)'
                     }}>
                         <div style={{
                             position: 'absolute', top: 0, left: 0, right: 0, height: '1px',
-                            background: 'linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.5), transparent)'
+                            background: 'linear-gradient(90deg, transparent, var(--accent-cyan), transparent)'
                         }}></div>
 
-                        <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '2rem', color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '2rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '12px' }}>
                             {PRIVACY_LEVELS[2].icon}
                             InnerOrbit
                         </div>
-                        <ul style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', color: '#cbd5e1' }}>
+                        <ul style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', color: 'var(--text-primary)' }}>
                             <li style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ color: '#22d3ee' }}>✓</span> <strong>Camouflage Mode:</strong> App looks like a calculator
+                                <span style={{ color: 'var(--accent-cyan)' }}>✓</span> <strong>Camouflage Mode:</strong> App looks like a calculator
                             </li>
                             <li style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ color: '#22d3ee' }}>✓</span> <strong>Private Language:</strong> Slang auto-translation
+                                <span style={{ color: 'var(--accent-cyan)' }}>✓</span> <strong>Private Language:</strong> Slang auto-translation
                             </li>
                             <li style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ color: '#22d3ee' }}>✓</span> <strong>Ghost Notifications:</strong> Discreet vibrations only
+                                <span style={{ color: 'var(--accent-cyan)' }}>✓</span> <strong>Ghost Notifications:</strong> Discreet vibrations only
                             </li>
                             <li style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ color: '#22d3ee' }}>✓</span> <strong>Panic Wipe:</strong> Shake to destroy data
+                                <span style={{ color: 'var(--accent-cyan)' }}>✓</span> <strong>Panic Wipe:</strong> Shake to destroy data
                             </li>
                         </ul>
                     </div>
@@ -497,32 +495,28 @@ const FeaturesSection = () => {
         <section id="features" className="bg-features" style={{ position: 'relative', padding: '8rem 0' }}>
             <div className="container" style={{ position: 'relative', zIndex: 10 }}>
                 <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-                    <h2 style={{ fontSize: '3rem', fontWeight: 800, marginBottom: '1rem', color: '#0f172a' }}>
+                    <h2 style={{ fontWeight: 800, marginBottom: '1rem', color: 'var(--text-primary)' }}>
                         Your Privacy, <span className="gradient-text">Your Control</span>
                     </h2>
-                    <p style={{ color: '#64748b', fontSize: '1.2rem', maxWidth: '600px', margin: '0 auto' }}>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '1.2rem', maxWidth: '600px', margin: '0 auto' }}>
                         Built for those who demand absolute secrecy. Your data never leaves your device unencrypted.
                     </p>
                 </div>
 
-                <div className="feature-grid">
+                <div className="responsive-grid">
                     {features.map((f, i) => (
-                        <div key={i} className="feature-card" style={{
-                            border: '1px solid rgba(255,255,255,0.05)',
-                            background: 'rgba(255,255,255,0.02)',
-                            backdropFilter: 'blur(10px)'
-                        }}>
+                        <div key={i} className="feature-card" style={styles.glass}>
                             <div style={{
                                 width: '60px', height: '60px', borderRadius: '16px',
-                                background: 'rgba(6, 182, 212, 0.1)', display: 'flex',
+                                background: 'var(--accent-cyan)20', display: 'flex',
                                 alignItems: 'center', justifyContent: 'center', marginBottom: '1.5rem',
-                                color: '#22d3ee'
+                                color: 'var(--accent-cyan)'
                             }}>
                                 {/* Icons would go here */}
                                 <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>{f.icon === 'calc' ? '±' : f.icon === 'lock' ? '🔒' : '★'}</div>
                             </div>
-                            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', fontWeight: 700, color: '#f1f5f9' }}>{f.title}</h3>
-                            <p style={{ color: '#94a3b8', lineHeight: 1.6 }}>{f.desc}</p>
+                            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.5rem', fontWeight: 700, color: 'var(--text-primary)' }}>{f.title}</h3>
+                            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{f.desc}</p>
                         </div>
                     ))}
                 </div>
@@ -558,7 +552,7 @@ const WebSection = () => {
         <section id="web-version" style={{ padding: '8rem 0', background: 'rgba(6, 182, 212, 0.02)', position: 'relative' }}>
             <div className="container" style={{ position: 'relative', zIndex: 10 }}>
                 <div style={{ textAlign: 'center', marginBottom: '4rem' }}>
-                    <h2 style={{ fontSize: '3rem', fontWeight: 800, marginBottom: '1rem' }}>
+                    <h2 style={{ fontWeight: 800, marginBottom: '1rem' }}>
                         Access Anywhere with <span className="gradient-text">Web Version</span>
                     </h2>
                     <p style={{ color: '#64748b', fontSize: '1.2rem', maxWidth: '700px', margin: '0 auto' }}>
@@ -566,19 +560,16 @@ const WebSection = () => {
                     </p>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '2rem', marginBottom: '4rem' }}>
+                <div className="responsive-grid" style={{ marginBottom: '4rem' }}>
                     {webFeatures.map((f, i) => (
                         <div key={i} className="web-feature-card" style={{
+                            ...styles.glass,
                             padding: '2.5rem',
-                            borderRadius: '24px',
-                            background: 'rgba(255, 255, 255, 0.03)',
-                            border: '1px solid rgba(6, 182, 212, 0.1)',
-                            backdropFilter: 'blur(10px)',
                             transition: 'transform 0.3s'
                         }}>
                             <div style={{ fontSize: '2.5rem', marginBottom: '1.5rem' }}>{f.icon}</div>
-                            <h3 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '1rem', color: '#f1f5f9' }}>{f.title}</h3>
-                            <p style={{ color: '#94a3b8', lineHeight: 1.6 }}>{f.desc}</p>
+                            <h3 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '1rem', color: 'var(--text-primary)' }}>{f.title}</h3>
+                            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{f.desc}</p>
                         </div>
                     ))}
                 </div>
@@ -812,7 +803,7 @@ const Footer = () => {
                     gap: '1rem'
                 }}>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button 
+                        <button
                             onClick={() => setTheme('default')}
                             title="Default Theme"
                             style={{
@@ -822,9 +813,9 @@ const Footer = () => {
                                 ...(theme === 'default' ? activeStyle : inactiveStyle)
                             }}
                         >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></svg>
                         </button>
-                        <button 
+                        <button
                             onClick={() => setTheme('light')}
                             title="Light Theme"
                             style={{
@@ -834,9 +825,9 @@ const Footer = () => {
                                 ...(theme === 'light' ? activeStyle : inactiveStyle)
                             }}
                         >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="5" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></svg>
                         </button>
-                        <button 
+                        <button
                             onClick={() => setTheme('dark')}
                             title="Dark Theme"
                             style={{
@@ -846,9 +837,42 @@ const Footer = () => {
                                 ...(theme === 'dark' ? activeStyle : inactiveStyle)
                             }}
                         >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" /></svg>
                         </button>
                     </div>
+
+                    {/* TEMPORARY FOOTER LOGOUT */}
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <button 
+                            onClick={() => {
+                                sessionStorage.removeItem('portalAccess');
+                                window.location.href = 'index.html';
+                            }}
+                            style={{
+                                padding: '8px 20px',
+                                background: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid rgba(239, 68, 68, 0.4)',
+                                borderRadius: '10px',
+                                color: '#ef4444',
+                                fontSize: '0.85rem',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                backdropFilter: 'blur(10px)',
+                                transition: 'all 0.3s'
+                            }}
+                            onMouseOver={e => {
+                                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                            }}
+                            onMouseOut={e => {
+                                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                                e.currentTarget.style.transform = 'translateY(0)';
+                            }}
+                        >
+                            DEV: LOGOUT 🚪
+                        </button>
+                    </div>
+
                     <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
                         © 2026 InnerOrbit Inc. All rights reserved.
                     </div>
@@ -859,6 +883,12 @@ const Footer = () => {
 };
 
 const App = () => {
+    useEffect(() => {
+        // Signal that the portal is fully mounted and ready for the entrance animation
+        window.PORTAL_READY = true;
+        window.dispatchEvent(new CustomEvent('portal-ready'));
+    }, []);
+
     return (
         <div style={{ overflowX: 'hidden' }}>
             <Navbar />

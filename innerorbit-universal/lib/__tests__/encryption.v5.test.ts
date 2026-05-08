@@ -1,5 +1,5 @@
 
-import { encryptV5, decryptV5, getRatchetSession, saveRatchetSession } from "../encryption";
+import { encryptV4, decryptV4, getRatchetSession, saveRatchetSession } from "../encryption";
 import { initializeRatchet } from "../ratchet";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import quickCrypto from "react-native-quick-crypto";
@@ -88,9 +88,9 @@ describe("Level 5 Encryption (Double Ratchet) Integration", () => {
 
     it("should encrypt and save state correctly", async () => {
         const plaintext = "Hello Level 5";
-        const encrypted = await encryptV5(conversationId, plaintext);
+        const encrypted = await encryptV4(conversationId, plaintext);
         
-        expect(encrypted).toContain("v5:");
+        expect(encrypted).toContain("v4:");
         
         // Verify state advanced
         const state = await getRatchetSession(conversationId);
@@ -101,10 +101,10 @@ describe("Level 5 Encryption (Double Ratchet) Integration", () => {
         const plaintext = "Secret message";
         
         // Alice encrypts
-        const encrypted = await encryptV5(conversationId, plaintext);
+        const encrypted = await encryptV4(conversationId, plaintext);
         
         // Bob decrypts (using his session)
-        const decrypted = await decryptV5("bob_conv", encrypted);
+        const decrypted = await decryptV4("bob_conv", encrypted);
         expect(decrypted).toBe(plaintext);
     });
 });

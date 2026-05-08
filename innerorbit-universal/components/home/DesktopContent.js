@@ -68,6 +68,9 @@ export const DesktopContent = ({
           biometricsSupported={security.biometricsSupported}
           screenshotsBlocked={security.screenshotsBlocked}
           handleToggleScreenshots={security.handleToggleScreenshots}
+          hardwareLockEnabled={security.hardwareLockEnabled}
+          hardwareSupported={security.hardwareSupported}
+          handleToggleHardwareLock={security.handleToggleHardwareLock}
         />
       ) : desktopDetailView === 'stealth' ? (
         <StealthSettingsView
