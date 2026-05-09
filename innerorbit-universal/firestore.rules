@@ -42,7 +42,15 @@ service cloud.firestore {
       allow create: if isAuth();
       
       match /messages/{messageId} {
-        allow read, write: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        // 🕶️ Sealed Sender: Participants can read and append
+        allow read: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        allow create: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        
+        // 🛡️ Updates allowed by participants (to support Edit Message)
+        allow update: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        
+        // Delete allowed by participants (e.g. for "Clear Chat" or "Delete for Me")
+        allow delete: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
       }
     }
 

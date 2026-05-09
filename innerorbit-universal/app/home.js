@@ -43,6 +43,7 @@ import { ConnectionRequestModal } from "../components/modals/ConnectionRequestMo
 import { LockConfirmationModal } from "../components/modals/LockConfirmationModal";
 import { ScannedUserModal } from "../components/modals/ScannedUserModal";
 import { CustomImagePicker } from "../components/modals/CustomImagePicker";
+import { AccountLinkModal } from "../components/modals/AccountLinkModal";
 
 // Hooks
 import { useConversations } from "../hooks/useConversations";
@@ -57,6 +58,7 @@ import { useTaglines } from "../hooks/useTaglines";
 import { usePrivacy } from "../hooks/usePrivacy";
 import { useHomeActions } from "../hooks/useHomeActions";
 import { useConnectionRequests } from "../hooks/useConnectionRequests";
+import { usePasswordNudge } from "../hooks/usePasswordNudge";
 
 export default function ChatListScreen() {
   // --- 1. Init Hooks & Context ---
@@ -65,7 +67,7 @@ export default function ChatListScreen() {
   // Support deep linking to specific tabs
   const { initialTab } = useLocalSearchParams();
 
-  const { user, isDecoyMode, setIsDecoyMode, welcomeData, setWelcomeData } = useAuth();
+  const { user, isDecoyMode, setIsDecoyMode, welcomeData, setWelcomeData, pendingGoogleLink, linkGoogleToEmailAccount, clearPendingGoogleLink } = useAuth();
   const { theme: THEME, isDark, toggleTheme, themePreference } = useAppTheme();
   const styles = React.useMemo(() => getHomeStyles(THEME), [THEME]);
   const { width } = useWindowDimensions();
@@ -101,6 +103,9 @@ export default function ChatListScreen() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [showSecuritySetup, setShowSecuritySetup] = useState(false);
+  const [pendingSecuritySetup, setPendingSecuritySetup] = useState(null);
+  // showNudge: true when usePasswordNudge says it's time to show the bottom-sheet nudge
+  const [showNudge, setShowNudge] = useState(false);
   const prevWelcomeDataRef = React.useRef(null);
   const initialSyncRef = React.useRef(false);
 
@@ -137,58 +142,110 @@ export default function ChatListScreen() {
 
   // Trigger Onboarding for new users (when welcomeData.type is 'welcome')
 
-  // Sequence Fix: Handle triggers AFTER WelcomeModal is closed
+  // --- Onboarding & Security Sequence Logic ---
+  // Flow: WelcomeModal -> OnboardingSlides -> Security Setup (Google or Password)
+
   React.useEffect(() => {
     if (welcomeData) {
       Logger.log(`[Home] 🎬 Welcome Flow ACTIVE - Type: ${welcomeData.type}`);
 
+      // Case A: Google user needing password setup (no welcome UI needed)
       if (welcomeData.type === 'security_onboarding') {
-        Logger.log("[Home] 🛡️ Google Security path detected - Bypassing Welcome UI");
-        prevWelcomeDataRef.current = welcomeData;
-        setWelcomeData(null);
+        Logger.log("[Home] 🛡️ Google Security path detected - Triggering Security Setup immediately");
+        triggerSecurityFlow(welcomeData);
+        setWelcomeData(null); 
         return;
       }
 
-      if (welcomeData.requiresSecuritySetup) {
-        setShowSecuritySetup(true);
-      }
-
+      // Case B: Standard Welcome (New or Returning)
       prevWelcomeDataRef.current = welcomeData;
     } else if (prevWelcomeDataRef.current) {
-      // WelcomeModal (or bypass) was JUST closed/triggered
+      // WelcomeModal was JUST closed/triggered
       const legacyData = prevWelcomeDataRef.current;
       prevWelcomeDataRef.current = null;
 
       Logger.log(`[Home] 🏁 Welcome Flow DISMISSED - Type: ${legacyData.type}`);
 
-      const checkOnboardingFlow = async () => {
-        // 1. Show Onboarding Slides if it was a fresh 'welcome'
-        if (legacyData.type === 'welcome') {
-          Logger.log("[Home] 📖 Triggering Onboarding Slides");
-          setShowOnboarding(true);
-        }
+      // 1. Determine if we need Onboarding Slides
+      if (legacyData.type === 'welcome') {
+        Logger.log("[Home] 📖 Triggering Onboarding Slides");
+        setShowOnboarding(true);
+      }
 
-        // 2. Trigger Security Setup if needed
-        const needsSecuritySetup = (legacyData.method === 'password' && legacyData.type === 'welcome') ||
-          (legacyData.method === 'google' && !legacyData.hasSetPassword);
+      // 2. Queue Security Setup for after Onboarding (or show now if no onboarding)
+      const needsSecuritySetup = (legacyData.method === 'password' && legacyData.type === 'welcome') ||
+        (legacyData.method === 'google' && !legacyData.hasSetPassword);
 
-        if (needsSecuritySetup) {
-          const hasSkipped = await AsyncStorage.getItem('onboarding_password_skipped');
-          if (!hasSkipped) {
-            Logger.log("[Home] 🛡️ Triggering Mandatory Security Modal");
-            ui.setIsSecuritySkippable(true);
-            ui.setSecurityMode('password');
-            ui.setSecurityStep(2);
-            ui.setShowSecurityModal(true);
-          }
+      if (needsSecuritySetup) {
+        Logger.log("[Home] 🛡️ Queueing Security Setup for later");
+        setPendingSecuritySetup(legacyData);
+        
+        // If no onboarding slides, trigger immediately
+        if (legacyData.type !== 'welcome') {
+          triggerSecurityFlow(legacyData);
         }
-      };
-      checkOnboardingFlow();
+      }
     }
   }, [welcomeData, ui]);
 
+  const triggerSecurityFlow = async (data) => {
+    if (!data) return;
+
+    Logger.log(`[Home] 🛡️ Triggering Security Flow for ${data.method}`);
+
+    if (data.method === 'google') {
+      // Show the dedicated Google inline prompt
+      setShowSecuritySetup(true);
+    } else {
+      // Show the standard Security Modal (usually for new email users to set a master password)
+      const hasSkipped = await AsyncStorage.getItem('onboarding_password_skipped');
+      if (!hasSkipped) {
+        ui.setIsSecuritySkippable(true);
+        ui.setSecurityMode('password');
+        ui.setSecurityStep(2);
+        ui.setShowSecurityModal(true);
+      }
+    }
+    setPendingSecuritySetup(null);
+  };
+
+  const handleOnboardingClose = () => {
+    setShowOnboarding(false);
+    Logger.log("[Home] ✅ Onboarding Slides closed");
+
+    // Check if there is a pending security setup
+    if (pendingSecuritySetup) {
+      triggerSecurityFlow(pendingSecuritySetup);
+    }
+  };
+
   // --- NEW: Onboarding Sequence (Welcome -> Security) ---
   // Note: Post-welcome action handling is done in the welcomeData useEffect above
+
+  // --- Password Nudge (Google-only users without a backup password) ---
+  const isGoogleOnlyNudgeEligible = !!(user && welcomeData === null && !showOnboarding && !showSecuritySetup);
+  const googleUserHasNoPassword = !!(welcomeData?.method === 'google' && !welcomeData?.hasSetPassword) ||
+    // Also trigger for already-logged-in Google-only users (no welcomeData on re-open)
+    false;
+  // We drive the nudge from auth method stored on user's profile – read once
+  const [googleOnlyFlag, setGoogleOnlyFlag] = React.useState(false);
+  React.useEffect(() => {
+    if (user && isGoogleOnlyNudgeEligible) {
+      // Check if this is a Google-only user (no password)
+      const isGoogleProvider = user.providerData?.some(p => p.providerId === 'google.com');
+      const hasPasswordProvider = user.providerData?.some(p => p.providerId === 'password');
+      setGoogleOnlyFlag(isGoogleProvider && !hasPasswordProvider);
+    }
+  }, [user, isGoogleOnlyNudgeEligible]);
+
+  const { shouldNudge, isChecking, dismissNudge, completeNudge } = usePasswordNudge(googleOnlyFlag);
+
+  React.useEffect(() => {
+    if (shouldNudge && !showSecuritySetup && !showOnboarding && !welcomeData) {
+      Logger.log('[Home] 🔔 Password nudge scheduled – showing bottom-sheet');
+      setShowNudge(true);
+    }
+  }, [shouldNudge]);
 
   const conversationsData = useConversations(user, isDecoyMode, isDesktop, selectedConversationId, privacyLevel);
   const { conversations, nicknames, loading } = conversationsData;
@@ -614,6 +671,11 @@ export default function ChatListScreen() {
         setSecurityNewPin={ui.setSecurityNewPin}
         showSecurityNewPass={ui.showSecurityNewPass}
         setShowSecurityNewPass={ui.setShowSecurityNewPass}
+        isSkippable={ui.isSecuritySkippable}
+        onSkip={() => {
+          ui.setShowSecurityModal(false);
+          ui.setIsSecuritySkippable(false);
+        }}
       />
 
       <UpdateWalkthrough
@@ -673,6 +735,13 @@ export default function ChatListScreen() {
         THEME={THEME}
       />
 
+      <LockConfirmationModal
+        visible={ui.showLockConfirmation}
+        onClose={() => ui.setShowLockConfirmation(false)}
+        onConfirm={confirmLock}
+        THEME={THEME}
+      />
+
       <UserSearchModal
         visible={ui.showSearchModal}
         onClose={() => ui.setShowSearchModal(false)}
@@ -696,7 +765,8 @@ export default function ChatListScreen() {
         THEME={THEME}
       />
 
-      {/* Google Security Setup View (Overlay) */}
+      {/* Google Security Setup View */}
+      {/* Blocking mode: first-time onboarding (showSecuritySetup is set by triggerSecurityFlow) */}
       {showSecuritySetup && !welcomeData && !showOnboarding && (
         <GoogleSecurityPrompt
           THEME={THEME}
@@ -704,7 +774,31 @@ export default function ChatListScreen() {
           showSuccess={showSuccess}
           onComplete={() => {
             setShowSecuritySetup(false);
+            completeNudge();
           }}
+          onSkip={() => {
+            setShowSecuritySetup(false);
+            dismissNudge();
+          }}
+          isNudge={false}
+        />
+      )}
+
+      {/* Nudge mode: bottom-sheet for returning Google-only users */}
+      {showNudge && !showSecuritySetup && !showOnboarding && !welcomeData && (
+        <GoogleSecurityPrompt
+          THEME={THEME}
+          showError={showError}
+          showSuccess={showSuccess}
+          onComplete={() => {
+            setShowNudge(false);
+            completeNudge();
+          }}
+          onSkip={() => {
+            setShowNudge(false);
+            dismissNudge();
+          }}
+          isNudge={true}
         />
       )}
 
@@ -765,8 +859,19 @@ export default function ChatListScreen() {
       {/* Onboarding Slides (Topmost Layer for New Users) */}
       <OnboardingSlides
         visible={showOnboarding}
-        onClose={() => setShowOnboarding(false)}
+        onClose={handleOnboardingClose}
         THEME={THEME}
+      />
+
+      {/* Account Link Modal: shown when email-user tries Google sign-in on same email */}
+      <AccountLinkModal
+        visible={!!pendingGoogleLink}
+        email={pendingGoogleLink?.email || ''}
+        onLink={linkGoogleToEmailAccount}
+        onDismiss={clearPendingGoogleLink}
+        THEME={THEME}
+        showError={showError}
+        showSuccess={showSuccess}
       />
     </ScreenContainer>
   );

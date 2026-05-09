@@ -6,7 +6,7 @@ import React, { createContext, useContext, useEffect, useState, useRef } from "r
 import { AppState } from "react-native";
 import { isWeb, isMobile, Platform } from "../utils/platform";
 import { auth, firebase } from "../lib/firebase";
-import { signInWithEmailAndPassword, signInWithCredential, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, signOut } from "firebase/auth";
+import { signInWithEmailAndPassword, signInWithCredential, createUserWithEmailAndPassword, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, EmailAuthProvider, linkWithCredential, reauthenticateWithCredential, onAuthStateChanged, signOut } from "firebase/auth";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as LocalAuthentication from 'expo-local-authentication';
 import { createUserProfile } from "../lib/firestore-service";
@@ -14,8 +14,11 @@ import { updateUserProfile } from "../lib/firestore-service";
 import SecureStorage from "../lib/secure-storage-service";
 import { AuthProtector, LocalPinProtector } from '../lib/security-utils';
 import { Logger } from '../lib/logger';
+import { IdentitySecurityService, DEV_MODE_PLAIN_IDENTITY } from "../lib/identity-security-service";
 import { DEFAULT_ENCRYPTION_CAPABILITIES } from "../lib/encryption";
 import { publishMyKeysOnLogin } from "../lib/ratchet-key-service";
+import { PresenceService } from "../lib/presence-service";
+import { useThemeStore } from "../store/themeStore";
 
 export const AuthContext = createContext(undefined);
 
@@ -30,6 +33,7 @@ let sessionHasInitialized = false; // Persistent flag for the whole JS session
 let gisClientInitialized = false; // track GIS initialization
 
 export function AuthProvider({ children }) {
+  const setDecoyMode = useThemeStore(state => state.setDecoyMode);
   // ─── Instant Session Recovery ────────────────────────────────────────────────
   // We use a static variable outside the component to survive remounts during navigation.
   const [user, setUser] = useState(lastUserSession || null);
@@ -60,10 +64,19 @@ export function AuthProvider({ children }) {
 
     if (!isRemount) {
       Logger.log("[Auth] 🚀 AuthProvider FIRST MOUNT (Fresh Launch)");
+
+      // 🛠️ DEV MODE WARNING
+      if (DEV_MODE_PLAIN_IDENTITY) {
+        Logger.warn("[Identity] ⚠️ DEV_MODE: Identity saved in PLAIN TEXT.");
+      }
+
       // Initialize SecureStorage cache once per session
       SecureStorage.init().finally(() => {
         setAuthLoading(false);
       });
+
+      // Initial sync of decoy state to theme store
+      setDecoyMode(lastDecoyState);
     } else {
       Logger.log("[Auth] ♻️ AuthProvider REMOUNTED (Session State Preserved)");
       // Resilience: Clear unlocking state if it was stuck in cache during remount
@@ -144,6 +157,8 @@ export function AuthProvider({ children }) {
   const [showPersistencePrompt, setShowPersistencePrompt] = useState(false);
   const [welcomeData, setWelcomeData] = useState(null); // { userId, pin } for new users
   const [pendingCredentials, setPendingCredentials] = useState(null);
+  // Account linking: set when user tries Google sign-in but email already has password account
+  const [pendingGoogleLink, setPendingGoogleLink] = useState(null); // { email, googleCredential }
   const isLoggingOutRef = useRef(false);
   const isPermissionRequestingRef = useRef(false);
   const lockTimerRef = useRef(null);
@@ -154,6 +169,7 @@ export function AuthProvider({ children }) {
     Logger.log(`[Auth] 🔄 setIsDecoyMode(${val}) | Reason: ${reason} | From Route: ${isDecoyModeInternal ? 'Locked' : 'Unlocked'}`);
     lastDecoyState = val; // Synchronous update to session cache
     setIsDecoyModeInternal(val);
+    setDecoyMode(val); // Sync to theme store to break require cycles
   };
   const isDecoyMode = isDecoyModeInternal;
 
@@ -210,15 +226,15 @@ export function AuthProvider({ children }) {
           // If a user is found, we simply set them. 
           setUser(currentUser);
           try {
-            const { updateUserPresence } = await import("../lib/firestore-service");
             // 1. Initial Presence Update
-            await updateUserPresence(currentUser.uid, true, true).catch(() => { });
+            const sharePresence = useThemeStore.getState().sharePresence;
+            await PresenceService.publishPresence(sharePresence).catch(() => { });
 
             // 2. Start Heartbeat (Immediate & Interval)
             // Clear existing to be safe
             if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
 
-            Logger.log("[Auth] ❤️ Starting Session Heartbeat...");
+            Logger.log("[Auth] ❤️ Starting Sealed Presence Heartbeat...");
             presenceIntervalRef.current = setInterval(async () => {
               // Periodically check if session expired while app is open
               const sessionStartTime = await AsyncStorage.getItem(`session_start_${currentUser.uid}`);
@@ -226,7 +242,8 @@ export function AuthProvider({ children }) {
                 await logout();
                 return;
               }
-              updateUserPresence(currentUser.uid, true, true).catch(() => { });
+              const currentSharePresence = useThemeStore.getState().sharePresence;
+              PresenceService.publishPresence(currentSharePresence).catch(() => { });
             }, 60000);
 
           } catch (e) { }
@@ -310,15 +327,14 @@ export function AuthProvider({ children }) {
         // Heartbeat Resume
         const currentUser = userRef.current;
         if (currentUser?.uid || auth.currentUser?.uid) {
-          import("../lib/firestore-service").then(({ updateUserPresence }) => {
-            const uid = auth.currentUser?.uid || currentUser?.uid;
-            updateUserPresence(uid, true, true).catch(() => { });
+          const sharePresence = useThemeStore.getState().sharePresence;
+          PresenceService.publishPresence(sharePresence).catch(() => { });
 
-            if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
-            presenceIntervalRef.current = setInterval(() => {
-              updateUserPresence(uid, true, true).catch(() => { });
-            }, 60000);
-          });
+          if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
+          presenceIntervalRef.current = setInterval(() => {
+            const currentSharePresence = useThemeStore.getState().sharePresence;
+            PresenceService.publishPresence(currentSharePresence).catch(() => { });
+          }, 60000);
         }
       }
 
@@ -328,14 +344,8 @@ export function AuthProvider({ children }) {
           clearInterval(presenceIntervalRef.current);
           presenceIntervalRef.current = null;
         }
-
-        const currentUser = userRef.current;
-        if (currentUser?.uid || auth.currentUser?.uid) {
-          import("../lib/firestore-service").then(({ updateUserPresence }) => {
-            const uid = auth.currentUser?.uid || currentUser?.uid;
-            updateUserPresence(uid, false, true).catch(() => { });
-          });
-        }
+        // Note: For Sealed Presence, we just stop the heartbeat when backgrounded.
+        // No need for explicit 'offline' status as per privacy goals.
 
         if (!isWeb && !isPermissionRequestingRef.current) {
           if (inGracePeriod) {
@@ -368,20 +378,22 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const handlePresence = async (isOnline) => {
       if (user?.uid || auth.currentUser?.uid) {
-        const { updateUserPresence } = await import("../lib/firestore-service");
-        const uid = auth.currentUser?.uid || user?.uid;
-        updateUserPresence(uid, isOnline, true).catch(() => { });
-
+        const sharePresence = useThemeStore.getState().sharePresence;
+        
         if (isOnline) {
+          PresenceService.publishPresence(sharePresence).catch(() => { });
+          
           if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
           presenceIntervalRef.current = setInterval(() => {
-            updateUserPresence(uid, true, true).catch(() => { });
+            const currentSharePresence = useThemeStore.getState().sharePresence;
+            PresenceService.publishPresence(currentSharePresence).catch(() => { });
           }, 60000);
         } else {
           if (presenceIntervalRef.current) {
             clearInterval(presenceIntervalRef.current);
             presenceIntervalRef.current = null;
           }
+          // Note: In Sealed Sender, we simply stop the heartbeat.
         }
       }
     };
@@ -394,10 +406,9 @@ export function AuthProvider({ children }) {
     };
 
     const handleBeforeUnload = () => {
-      const { updateUserPresence } = require("../lib/firestore-service");
-      const uid = auth.currentUser?.uid || user?.uid;
-      if (uid) {
-        updateUserPresence(uid, false, true).catch(() => { });
+      if (presenceIntervalRef.current) {
+        clearInterval(presenceIntervalRef.current);
+        presenceIntervalRef.current = null;
       }
     };
 
@@ -530,6 +541,11 @@ export function AuthProvider({ children }) {
         hasSetPassword: true // Email signups always have a password at this point
       });
 
+      // 🔐 IDENTITY SECURITY: Save encrypted identity to local hardware storage
+      if (profileData.userId && profileData.pin) {
+        await IdentitySecurityService.saveIdentityLocally(profileData.userId, profileData.pin);
+      }
+
       // Don't auto-save credentials on signup - let user decide later
       await SecureStorage.incrementManualLoginCount();
       Logger.log(`[Auth] ✅ Sign Up SUCCESS: ${profileData.userId}`);
@@ -584,6 +600,17 @@ export function AuthProvider({ children }) {
       }
     } catch (err) {
       Logger.error("Google Sign In Error:", err);
+
+      // Account-exists conflict: email already registered with password
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        const googleCredential = GoogleAuthProvider.credentialFromError(err);
+        const email = err.customData?.email || '';
+        Logger.log(`[Auth] 🔗 Account conflict detected for ${email} – prompting link`);
+        setPendingGoogleLink({ email, googleCredential });
+        setAuthLoading(false);
+        return; // Don't throw – show AccountLinkModal instead
+      }
+
       const errorMessage = err?.message || "Google Sign In failed";
       setError(errorMessage);
       setAuthLoading(false);
@@ -686,6 +713,16 @@ export function AuthProvider({ children }) {
       return result.user;
     } catch (err) {
       Logger.error("Google Credential Sign In Error:", err);
+
+      // Account-exists conflict (One Tap path)
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        const googleCredential = GoogleAuthProvider.credentialFromError(err);
+        const email = err.customData?.email || '';
+        Logger.log(`[Auth] 🔗 Account conflict (credential path) for ${email}`);
+        setPendingGoogleLink({ email, googleCredential });
+        return;
+      }
+
       const errorMessage = err?.message || "Google Sign In failed";
       setError(errorMessage);
       throw new Error(errorMessage);
@@ -812,6 +849,11 @@ export function AuthProvider({ children }) {
           setShowPersistencePrompt(true);
         }
 
+        // 🔐 IDENTITY SECURITY: Bind session identity to hardware
+        if (userProfile.userId && passwordOrPin && isPinLogin) {
+          await IdentitySecurityService.saveIdentityLocally(userProfile.userId, passwordOrPin);
+        }
+
         Logger.log(`[Auth] ✅ PIN Sign-In SUCCESS: ${appUser.userId}`);
         return appUser;
       } else {
@@ -841,6 +883,11 @@ export function AuthProvider({ children }) {
 
         // Ensure local state reflects this immediately
         profileData.hasSetPassword = true;
+
+        // 🔐 IDENTITY SECURITY: Bind session identity to hardware
+        if (profileData.userId && profileData.pin) {
+          await IdentitySecurityService.saveIdentityLocally(profileData.userId, profileData.pin);
+        }
 
         // Modal logic:
         // 1. New user -> 'welcome'
@@ -984,6 +1031,41 @@ export function AuthProvider({ children }) {
     else Logger.log("[Auth] 🛡️ Auto-lock resumed");
   };
 
+  /**
+   * Links a pending Google credential to an existing email/password account.
+   * Called from AccountLinkModal after user enters their password.
+   * @param {string} password – the user's existing email account password
+   */
+  const linkGoogleToEmailAccount = async (password) => {
+    if (!pendingGoogleLink) throw new Error('No pending Google link found.');
+    const { email, googleCredential } = pendingGoogleLink;
+
+    try {
+      Logger.log(`[Auth] 🔗 Linking Google to email account: ${email}`);
+
+      // 1. Sign in with email+password to get a valid Firebase user
+      const emailCredential = EmailAuthProvider.credential(email, password);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+
+      // 2. Link Google provider to this account
+      await linkWithCredential(result.user, googleCredential);
+      Logger.log('[Auth] ✅ Google provider linked successfully');
+
+      // 3. Create/update Firestore profile (account already exists)
+      await createUserProfile(result.user);
+
+      // 4. Clear pending state
+      setPendingGoogleLink(null);
+
+      return result.user;
+    } catch (err) {
+      Logger.error('[Auth] Link failed:', err.message);
+      throw err;
+    }
+  };
+
+  const clearPendingGoogleLink = () => setPendingGoogleLink(null);
+
 
 
   return (
@@ -1015,6 +1097,9 @@ export function AuthProvider({ children }) {
       handlePersistenceDecline,
       setPermissionRequesting,
       persistenceEnabled: SecureStorage.isPersistenceEnabledSync(),
+      pendingGoogleLink,
+      linkGoogleToEmailAccount,
+      clearPendingGoogleLink,
     }}>
       {children}
     </AuthContext.Provider>

@@ -21,6 +21,7 @@ import {
 import { auth, db, storage } from "./firebase";
 import { ref as storageRefFn, uploadBytes, getDownloadURL, listAll, deleteObject } from "firebase/storage";
 import { Logger } from "./logger";
+import { IdentitySecurityService } from "./identity-security-service";
 
 /**
  * Firestore Service Module for InnerOrbit
@@ -54,8 +55,13 @@ export async function createUserProfile(user) {
         if (!data.encryptionCapabilities) {
           await setDoc(userRef, { encryptionCapabilities: DEFAULT_ENCRYPTION_CAPABILITIES }, { merge: true });
         }
+
+        // 🔐 DECRYPT CLOUD IDENTITY (v5.5 -> v3 Fallback handled by service)
+        const decryptedUserId = IdentitySecurityService.decryptFromCloud(data.userId, user.uid);
+        const decryptedPin = IdentitySecurityService.decryptFromCloud(data.pin, user.uid);
+
         const sanitizedUid = user.uid ? `${user.uid.substring(0, 5)}...` : 'unknown';
-        Logger.log(`[Firestore] Profile already exists for ${sanitizedUid}. ID: ${data.userId}`);
+        Logger.log(`[Firestore] Profile already exists for ${sanitizedUid}. ID: ${decryptedUserId}`);
 
         // Calculate isReturningUser: true if lastSeen is older than 7 days
         let isReturningUser = false;
@@ -74,8 +80,8 @@ export async function createUserProfile(user) {
         }
 
         return {
-          userId: data.userId,
-          pin: data.pin,
+          userId: resolvedUserId,
+          pin: resolvedPin || resolvedUserId,
           isNewUser: false,
           isReturningUser,
           hasSetPassword: data.hasSetPassword || false
@@ -129,24 +135,112 @@ export async function createUserProfile(user) {
         };
       }
 
+      // 🔐 IDENTITY STORAGE MODEL (v5.5 Hybrid)
+      // ─────────────────────────────────────────────────────────────────────────
+      // userId → PLAIN TEXT: Must remain queryable for PIN login & contact search.
+      //          (encryptForCloud uses a per-uid key, making the same userId produce
+      //           different ciphertexts for different users → Firestore can't query it)
+      // pin    → ENCRYPTED: Never queried; read back only by the owning uid.
+      // ─────────────────────────────────────────────────────────────────────────
+      const cloudSyncEnabled = await IdentitySecurityService.isCloudSyncEnabled();
+      const encryptedPin = cloudSyncEnabled ? IdentitySecurityService.encryptForCloud(pin, user.uid) : "LOCAL_ONLY";
+
       transaction.set(userRef, {
         uid: user.uid,
         email: user.email,
-        userId: userId,
-        pin: pin,
-        hasSetPassword: false, // NEW: Track if Google users have set a backup password
+        userId,          // ← plain text (intentional — see model above)
+        pin: encryptedPin,
+        hasSetPassword: false,
         encryptionCapabilities: DEFAULT_ENCRYPTION_CAPABILITIES,
+        profileEncryptionVersion: "v5.5",
         createdAt: serverTimestamp(),
         lastSeen: serverTimestamp(),
       }, { merge: true });
 
       const sanitizedUid = user.uid ? `${user.uid.substring(0, 5)}...` : 'unknown';
-      Logger.log(`[Firestore] ✅ Created NEW profile for ${sanitizedUid}: ${userId}`);
+      Logger.log(`[Firestore] ✅ Created NEW profile for ${sanitizedUid}: ${userId} (pin encrypted v5.5)`);
       return { userId, pin, isNewUser: true, hasSetPassword: false };
     });
   } catch (error) {
     Logger.error("Error creating user profile:", error);
     throw error;
+  }
+}
+
+/**
+ * 🔄 LAZY IDENTITY MIGRATION — v5.5 Hybrid Enforcement
+ *
+ * Detects and repairs legacy Firestore identity records on every login:
+ *   - Encrypted userId   → unwound to plain text (must stay queryable)
+ *   - Plain-text pin     → encrypted with v5.5 (must be private)
+ *
+ * This function is:
+ *   • Idempotent: Already-migrated profiles are detected via `profileEncryptionVersion` and skipped.
+ *   • Non-blocking: Errors are caught and logged; the caller receives the pre-migration data on failure.
+ *   • Atomic:  Only one Firestore write occurs, and only when migration is actually needed.
+ *
+ * @param userRef   - Firestore DocumentReference for the user
+ * @param data      - Current raw Firestore document data (already fetched by caller)
+ * @param uid       - Firebase Auth UID of the user (used as encryption key derivation input)
+ * @returns { migratedUserId, migratedPin } or nulls if no migration was needed
+ */
+async function migrateIdentityEncryptionIfNeeded(userRef, data, uid) {
+  try {
+    // Already fully migrated — no work needed.
+    if (data.profileEncryptionVersion === "v5.5") {
+      return { migratedUserId: null, migratedPin: null };
+    }
+
+    const updates = {};
+    let migratedUserId = null;
+    let migratedPin = null;
+
+    // --- Repair 1: userId must be PLAIN TEXT ---
+    // A ':' character indicates an encrypted v5.5 blob (e.g. "v5.5:nonce:ciphertext").
+    // Decrypt it back to plain text so Firestore queries continue to work.
+    if (data.userId && data.userId.includes(":")) {
+      const plainUserId = IdentitySecurityService.decryptFromCloud(data.userId, uid);
+      if (plainUserId && !plainUserId.startsWith("🔒")) {
+        updates.userId = plainUserId;
+        migratedUserId = plainUserId;
+        Logger.log(`[Migration] ✅ Unwound encrypted userId → plain text for ${uid.substring(0, 5)}...`);
+      } else {
+        Logger.warn(`[Migration] ⚠️ Could not decrypt userId for ${uid.substring(0, 5)}... — leaving unchanged.`);
+      }
+    } else {
+      // Already plain text — no change needed, but note the resolved value
+      migratedUserId = null; // null signals "use data.userId as-is"
+    }
+
+    // --- Repair 2: pin must be ENCRYPTED ---
+    // A ':' character indicates an encrypted blob. If absent, the pin is plain text (legacy).
+    if (data.pin && !data.pin.includes(":")) {
+      const cloudSyncEnabled = await IdentitySecurityService.isCloudSyncEnabled();
+      const encryptedPin = cloudSyncEnabled
+        ? IdentitySecurityService.encryptForCloud(data.pin, uid)
+        : "LOCAL_ONLY";
+      updates.pin = encryptedPin;
+      migratedPin = encryptedPin;
+      Logger.log(`[Migration] ✅ Encrypted plain-text PIN for ${uid.substring(0, 5)}...`);
+    } else {
+      migratedPin = null; // null signals "use data.pin as-is"
+    }
+
+    // --- Write migration atomically (only if something changed) ---
+    if (Object.keys(updates).length > 0) {
+      updates.profileEncryptionVersion = "v5.5";
+      updates.encryptionMigratedAt = serverTimestamp();
+      await setDoc(userRef, updates, { merge: true });
+      Logger.log(`[Migration] ✅ Lazy migration complete for ${uid.substring(0, 5)}...`, Object.keys(updates));
+    } else {
+      // Nothing to change — stamp the version flag so we skip next time
+      await setDoc(userRef, { profileEncryptionVersion: "v5.5" }, { merge: true });
+    }
+
+    return { migratedUserId, migratedPin };
+  } catch (err) {
+    Logger.error(`[Migration] ❌ Migration failed for ${uid?.substring(0, 5)}... — falling back to raw data:`, err);
+    return { migratedUserId: null, migratedPin: null };
   }
 }
 
@@ -160,7 +254,14 @@ export async function getUserProfile(uid) {
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
     const userSnap = await getDoc(userRef);
-    return userSnap.exists() ? userSnap.data() : null;
+    if (userSnap.exists()) {
+      const data = userSnap.data();
+      // 🔐 DECRYPT CLOUD IDENTITY (v5.5 -> v3 Fallback)
+      if (data.userId) data.userId = IdentitySecurityService.decryptFromCloud(data.userId, uid);
+      if (data.pin) data.pin = IdentitySecurityService.decryptFromCloud(data.pin, uid);
+      return data;
+    }
+    return null;
   } catch (error) {
     // CRITICAL diagnostics for Motorola connectivity issues
     const networkStatus = typeof navigator !== 'undefined' && navigator.onLine ? "ONLINE" : "OFFLINE (Browser/Navigator)";
@@ -183,7 +284,16 @@ export async function updateUserProfile(uid, updates) {
   if (!uid) return;
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
-    await setDoc(userRef, { ...updates, updatedAt: Timestamp.now() }, { merge: true });
+
+    // 🔐 ENCRYPT ONLY PIN (v5.5) — userId MUST remain plain text for Firestore queries
+    const secureUpdates = { ...updates };
+    const cloudSyncEnabled = await IdentitySecurityService.isCloudSyncEnabled();
+
+    if (secureUpdates.pin && secureUpdates.pin !== "LOCAL_ONLY") {
+      secureUpdates.pin = cloudSyncEnabled ? IdentitySecurityService.encryptForCloud(secureUpdates.pin, uid) : "LOCAL_ONLY";
+    }
+
+    await setDoc(userRef, { ...secureUpdates, updatedAt: Timestamp.now() }, { merge: true });
     Logger.log(`[Firestore] ✅ Updated profile for ${uid}`);
   } catch (error) {
     Logger.error("Error updating user profile:", error);
@@ -223,7 +333,7 @@ export async function publishDhPublicKey(uid, dhPublicKeyBase64) {
 export async function publishV6PublicKeys(uid, dhPublicKey, pqcPublicKey, identityPublicKey, capabilitiesSignature) {
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
-    await setDoc(userRef, { 
+    await setDoc(userRef, {
       v6PublicKeys: {
         dh: dhPublicKey,
         pqc: pqcPublicKey,
@@ -479,10 +589,10 @@ export async function sendMessage(conversationId, senderId, encryptedText, reply
   try {
     const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
     const serverTime = Timestamp.now();
-    const { encVersion = null } = options || {};
+    const { encVersion = null, mimeType = null } = options || {};
 
     const messageData = {
-      senderId,
+      // 🕶️ SEALED SENDER: senderId removed from top-level
       encryptedText,
       timestamp: serverTime,
       status: 'sent', // 'sent', 'delivered', 'read'
@@ -491,6 +601,9 @@ export async function sendMessage(conversationId, senderId, encryptedText, reply
     };
     if (encVersion) {
       messageData.encVersion = encVersion;
+    }
+    if (mimeType) {
+      messageData.mimeType = mimeType;
     }
 
     if (scheduledSeconds > 0) {
@@ -506,18 +619,19 @@ export async function sendMessage(conversationId, senderId, encryptedText, reply
 
     // Update conversation's last message and increment unread count for recipient
     const conversationRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
-    
+
     // We need to find the recipient to increment their specific counter
     const convSnap = await getDoc(conversationRef);
     if (convSnap.exists()) {
       const convData = convSnap.data();
       const recipientId = convData.participantIds?.find(id => id !== senderId);
-      
+
       const updates = {
-        lastMessage: type === 'image' ? "📷 Image" : encryptedText,
+        lastMessage: type === 'image' || type === 'vault_media' ? (mimeType?.startsWith('image/') ? "📷 Image" : "📄 Document") : encryptedText,
         lastMessageTime: serverTime,
         lastMessageId: docRef.id,
-        lastMessageSenderId: senderId,
+        // 🕶️ SEALED SENDER: lastMessageSenderId anonymized
+        lastMessageSenderId: 'sealed',
         lastMessageStatus: 'sent',
       };
       if (encVersion && type === 'text') {
@@ -698,7 +812,7 @@ export function subscribeToConversations(userId, callback, onError) {
   if (!userId) {
     // Return a no-op unsubscribe if called before auth is ready
     Logger.warn("[Firestore] subscribeToConversations called without userId — skipping.");
-    return () => {};
+    return () => { };
   }
   try {
     const q = query(
@@ -850,7 +964,7 @@ export async function clearChatData(conversationId, deleteMedia = false) {
 
     await updateDoc(convRef, updates);
     Logger.log(`[Firestore] ✅ Conversation metadata cleared for ${conversationId.substring(0, 5)}...`);
-    
+
     return true;
   } catch (error) {
     Logger.error("[Firestore] ❌ Error clearing chat data:", error);
@@ -865,12 +979,12 @@ export async function clearChatForMe(conversationId, userId) {
   try {
     const convRef = doc(db, CONVERSATIONS_COLLECTION, conversationId);
     const clearedAtField = `clearedAt_${userId}`;
-    
+
     await updateDoc(convRef, {
       [clearedAtField]: Timestamp.now(),
       [`unreadCount_${userId}`]: 0 // Also reset their unread count
     });
-    
+
     Logger.log(`[Firestore] ✅ Chat cleared FOR ME (${userId.substring(0, 5)}...) in conv ${conversationId.substring(0, 5)}...`);
     return true;
   } catch (error) {
