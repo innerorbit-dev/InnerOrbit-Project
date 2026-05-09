@@ -48,6 +48,12 @@ export const DesktopContent = ({
           onChangeBio={profile.onChangeBio}
           handleUpdateBio={(bio) => profile.handleUpdateBio(bio, showSuccess, showError)}
           bioStatus={profile.bioStatus}
+          displayName={profile.displayName}
+          onChangeDisplayName={profile.onChangeDisplayName}
+          nameStatus={profile.nameStatus}
+          photoVisibility={profile.photoVisibility}
+          handleTogglePhotoVisibility={profile.handleTogglePhotoVisibility}
+          isInline={false}
         />
       ) : desktopDetailView === 'security' ? (
         <SecurityDetailView

@@ -1,6 +1,6 @@
 # 🛡️ InnerOrbit Comprehensive Knowledge Base
 
-This document serves as the definitive technical guide for the InnerOrbit messaging ecosystem. It is based on a structural and semantic analysis of the codebase (May 2026) and reflects the completion of the Quantum-Safe Identity & Unified UX Hardening phase.
+This document serves as the definitive technical guide for the InnerOrbit messaging ecosystem. It is based on a structural and semantic analysis of the codebase (May 2026) and reflects the completion of the **v5.5 Hybrid Identity Model & Auth UX Hardening** phase.
 
 ---
 
@@ -47,15 +47,19 @@ InnerOrbit is architected as a **Hybrid of Signal and WhatsApp**:
 
 The shared logic used by both the Expo (Mobile) and Electron/Web (Desktop) apps.
 
-- `/lib/media-vault-service.ts`: **[NEW]** High-performance 3-layer media pipeline.
-- `/lib/aegis-wrapper.ts`: **[NEW]** WASM-accelerated AEGIS-256 primitives for 4K media.
+- `/lib/media-vault-service.ts`: High-performance 3-layer media pipeline.
+- `/lib/aegis-wrapper.ts`: WASM-accelerated AEGIS-256 primitives for 4K media.
 - `/lib/encryption.ts`: The main cascading encryption engine.
 - `/lib/legacy-decryption.ts`: Isolated shim for historical protocol support (v1-v3).
 - `/lib/ratchet.ts`: Signal-based Double Ratchet logic with PQC extensions.
 - `/lib/firebase.js`: Production infrastructure for real-time signaling and auth.
 - `/lib/device-storage-service.ts`: Handles Secure Enclave (iOS) and Strongbox (Android) bindings.
 - `/lib/memory-hardening.ts`: **[NEW]** Utility for physically erasing sensitive data (Buffers) from RAM.
+- `/lib/identity-security-service.ts`: **[NEW]** v5.5 cloud identity encryption service (see §6.5).
+- `/lib/anti-capture-service.ts`: **[NEW]** Anti-screenshot/recording enforcement across all platforms.
+- `/lib/presence-service.ts`: **[NEW]** Sealed presence heartbeat service (encrypted status updates).
 - `/lib/firebase-polyfills.js`: **[HARDENED]** Central location for global shims, including WebAssembly and Crypto.
+- `/lib/firestore-service.js`: **[HARDENED]** Lazy identity migration, PIN encryption, plain-text userId contract.
 
 ### 🧮 CalcX (Stealth Interface)
 
@@ -112,7 +116,64 @@ InnerOrbit employs a physical memory erasure strategy to ensure sensitive creden
 - **Hardware Binding**: Identity keys are bound to platform-specific secure hardware (SecureStore/Keychain) for production use.
 - **Dev-Mode Bypass**: Implements `DEV_MODE_PLAIN_IDENTITY` in `identity-security-service.ts` to allow plain-text credential testing when `__DEV__` is active.
 
-### 🤖 Android Stabilization (Hermes Compatibility)
+---
+
+## 6.5. v5.5 Hybrid Identity Model (May 2026)
+
+This section documents the **critical architectural decision** resolving the conflict between security and Firestore queryability.
+
+### 🔑 The Core Invariant
+
+| Field | Firestore Storage | Reason |
+| :--- | :--- | :--- |
+| `userId` | **Plain text** | Must be `WHERE userId == X` queryable for PIN login & contact search |
+| `pin` | **v5.5 encrypted** | Private credential — never queried, owner-only decryption |
+| `email` | Plain text | Firebase Auth owns this; encrypting would break `searchUsersByEmail` |
+
+> **Why userId cannot be encrypted:** `IdentitySecurityService.encryptForCloud()` derives the key from `SHA256(cloud-vault-${uid})`. Two different users encrypting the same plain-text `userId` produce **different ciphertexts**, making Firestore `WHERE` queries permanently impossible. The 4-digit ID is a **public social handle**, not a secret.
+
+### 🔄 Lazy Migration System (`migrateIdentityEncryptionIfNeeded`)
+
+A transparent, idempotent function in `firestore-service.js` that runs on every login:
+
+1. **Detect encrypted userId** (contains `:` version separator) → decrypt and rewrite as plain text
+2. **Detect plain-text PIN** (no `:` separator) → encrypt with v5.5 and rewrite
+3. **Atomic write** — only triggers a Firestore `setDoc` if repair is actually needed
+4. **Stamp** `profileEncryptionVersion: "v5.5"` and `encryptionMigratedAt: serverTimestamp()` on completion
+
+**Idempotency**: If `profileEncryptionVersion === "v5.5"` is found, the function returns immediately — no reads, no writes, no cost.
+
+### ✅ Test Coverage
+
+`lib/__tests__/identity-migration.test.ts` — **5/5 passing**, **168/168 full suite green**:
+
+| Test | Scenario |
+| :--- | :--- |
+| 1 | Plain-text PIN → encrypted to v5.5; userId unchanged |
+| 2 | Accidentally-encrypted userId → unwound to plain text |
+| 3 | Already-migrated profile (`v5.5` stamp) → no-op |
+| 4 | Worst-case: both fields need repair simultaneously |
+| 5 | PIN login query contract invariant documented |
+
+---
+
+## 6.6. Auth UX Hardening (May 2026)
+
+### Google ↔ Email/Password Account Linking
+
+- **`AccountLinkModal.js`**: Non-blocking modal that allows users who signed up via Google to optionally create a password for backup login/recovery.
+- **`usePasswordNudge.js`**: AsyncStorage-backed hook that schedules gentle nudges at configurable intervals (default: 7 days). Users can skip indefinitely without being blocked.
+- **`GoogleSecurityPrompt.js`**: Updated to support a "nudge mode" bottom-sheet in addition to the original blocking prompt.
+
+### Account Linking Logic
+
+- **Google-only users**: May see a "Create Password" nudge after login. Optional, non-blocking.
+- **Email/password users**: Shown a "Sign in with Google" option on the login screen. If the Gmail address matches, accounts are linked via Firebase's `linkWithCredential`.
+- **Welcome Back toast**: Shown after 7+ days of inactivity (lightweight toast, no modal).
+
+---
+
+## 7. Android Stabilization (Hermes Compatibility)
 
 To prevent runtime crashes on Android's Hermes engine:
 
@@ -136,7 +197,7 @@ InnerOrbit uses a **Hybrid Loading Strategy** to distinguish between security-cr
 
 ---
 
-## 7. Known Technical Debt & Discrepancies
+## 8. Known Technical Debt & Discrepancies
 
 > [!IMPORTANT]
 > **Documentation Misalignment**
@@ -147,10 +208,24 @@ InnerOrbit uses a **Hybrid Loading Strategy** to distinguish between security-cr
 
 ---
 
+## 🔒 Security Audit (May 2026)
+
+A full git history scan was performed. **No actual secrets found** in any commit:
+
+- `innerorbit-universal/scripts/firebase-config.js` — loads from env vars only ✅
+- `innerorbit-universal/lib/firebase.js` — reads from `Constants.expoConfig.extra` / env vars ✅
+- `download-portal/src/js/firebase-config.js` — contains Firebase **web config** (public client-side identifier by design; not a secret) ✅
+- `google-services.json` — was present in initial commit `d2a1bca`, **removed** in `7f45b4a` ✅
+- No `serviceAccountKey.json`, no `private_key` fields found anywhere ✅
+
+---
+
 ## 🧬 Knowledge Graph Reference
 
-The full structural graph of the application is maintained in `graphify.json`.
+The full structural graph of the application is maintained in `graphify-out/graph.json`.
 
-- **Total Nodes**: 2,775 (Updated for Identity Hardening Phase)
-- **Total Edges**: 5,578
+- **Last built from commit**: `647d96ec` (graph is **stale** — 2 commits behind `4527353`)
+- **Total Nodes**: 2,775 + new session nodes (see `.graphify_semantic_manual.json`)
+- **Total Edges**: 5,578+
 - **Communities**: 208
+- **To refresh**: Run `graphify update .` from the repo root (no API cost)

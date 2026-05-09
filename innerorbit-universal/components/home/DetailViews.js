@@ -83,6 +83,8 @@ export const ProfileDetailView = ({
   displayName,
   onChangeDisplayName,
   nameStatus,
+  photoVisibility,
+  handleTogglePhotoVisibility,
   isInline
 }) => {
   const isMobile = isMobileLayout;
@@ -281,6 +283,35 @@ export const ProfileDetailView = ({
               <Text style={{ color: (userBio || "").length > 120 ? THEME.primary : THEME.textSecondary, fontSize: 11, fontWeight: '700' }}>
                 {(userBio || "").length} / 139
               </Text>
+            </View>
+          </View>
+
+          {/* 3. Photo Privacy Toggle */}
+          <View style={{
+            backgroundColor: (isInline || !isLargeDesktop) ? 'transparent' : THEME.surface,
+            borderRadius: 24,
+            padding: (isInline || !isLargeDesktop) ? 0 : 32,
+            borderWidth: 0,
+            borderColor: 'transparent',
+            marginBottom: (isInline || !isLargeDesktop) ? 12 : 0
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={{ width: isInline ? 32 : 40, height: isInline ? 32 : 40, borderRadius: isInline ? 8 : 12, backgroundColor: `${THEME.primary}1A`, justifyContent: 'center', alignItems: 'center', marginRight: isInline ? 10 : 14 }}>
+                  <Feather name="eye" size={isInline ? 16 : 20} color={THEME.primary} />
+                </View>
+                <View>
+                  <Text style={{ color: THEME.text, fontSize: isInline ? 15 : 18, fontWeight: '800' }}>Photo Privacy</Text>
+                  <Text style={{ color: THEME.textSecondary, fontSize: isInline ? 11 : 12 }}>{photoVisibility === 'contacts' ? 'Visible to established links' : 'Private to everyone'}</Text>
+                </View>
+              </View>
+              <Switch
+                value={photoVisibility === 'contacts'}
+                onValueChange={handleTogglePhotoVisibility}
+                trackColor={{ false: THEME.border, true: THEME.primary }}
+                thumbColor={isIOS ? '#fff' : (photoVisibility === 'contacts' ? THEME.primary : '#f4f3f4')}
+                style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+              />
             </View>
           </View>
 

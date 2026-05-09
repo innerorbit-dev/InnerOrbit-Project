@@ -1,160 +1,190 @@
-# 🌌 InnerOrbit: Universal Stealth Secure Messenger
+# InnerOrbit — Quantum-Safe Stealth Messenger
 
-[![React Native](https://img.shields.io/badge/React_Native-0.81.5-61DAFB?style=for-the-badge&logo=react)](https://reactnative.dev/)
-[![Expo](https://img.shields.io/badge/Expo-54.0.33-000020?style=for-the-badge&logo=expo)](https://expo.dev/)
-[![Firebase](https://img.shields.io/badge/Firebase-v12.8.0-FFCA28?style=for-the-badge&logo=firebase)](https://firebase.google.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Security: Level 7](https://img.shields.io/badge/Security-Level_7_PQXDH-blueviolet?style=for-the-badge)](./INNERORBIT_KNOWLEDGE_BASE.md)
+[![React Native](https://img.shields.io/badge/React_Native-0.81.5-61DAFB?style=flat-square&logo=react)](https://reactnative.dev/)
+[![Expo SDK](https://img.shields.io/badge/Expo-54.0.33-000020?style=flat-square&logo=expo)](https://expo.dev/)
+[![Firebase](https://img.shields.io/badge/Firebase-v12.8.0-FFCA28?style=flat-square&logo=firebase)](https://firebase.google.com/)
+[![Tests](https://img.shields.io/badge/Tests-168%2F168%20passing-brightgreen?style=flat-square&logo=jest)](./innerorbit-universal/lib/__tests__)
+[![Security Level](https://img.shields.io/badge/Security-Level_7_PQXDH-6d28d9?style=flat-square)](./INNERORBIT_KNOWLEDGE_BASE.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](./LICENSE)
 
-**CalcX** is a revolutionary secure messaging platform powered by the **InnerOrbit** core. Disguised as a fully functional calculator, it provides military-grade security with a zero-compromise stealth interface.
-
----
-
-## ✨ Key Features
-
-- **🔐 Level 7 PQXDH Encryption**: Post-Quantum Double Ratchet implementation providing Perfect Forward Secrecy (PFS) and Post-Compromise Security (PCS).
-- **🛡️ Quantum Resistance**: Native implementation of Hybrid ML-KEM-768 (Kyber) to secure data against future quantum computing threats.
-- **📱 Stealth Disguise**: Launches as a functional calculator; enter your secret code to reveal the hidden secure communication hub.
-- **🌐 Universal Platform**: Seamlessly synchronize conversations across Android, iOS, Web, and Desktop (Windows/macOS).
-- **🔋 Real-time Presence**: Instant message delivery and reliable online/offline status tracking via Firebase Cloud Firestore.
-- **📁 Secure Media Storage**: Encrypted 4K media attachments and profile synchronization with zero-knowledge privacy.
+InnerOrbit is a privacy-first messaging platform built on a **Post-Quantum Double Ratchet** (PQXDH) cryptographic foundation. Its stealth entry point — **CalcX**, a fully functional calculator — provides plausible deniability without compromising usability. The platform targets a "Hybrid Vision": Signal-grade security with WhatsApp-grade experience.
 
 ---
 
-## 🛠️ Tech Stack
+## Security Architecture
 
-### Frontend & Core
+InnerOrbit implements a cascading encryption engine that selects the strongest protocol both peers support, with a hard floor of AES-GCM-SIV. The active production protocols are:
 
-- **Framework**: [React Native](https://reactnative.dev/) via [Expo](https://expo.dev/) (SDK 54)
-- **State Management**: [Zustand](https://github.com/pmndrs/zustand)
-- **Navigation**: [Expo Router](https://docs.expo.dev/router/introduction/) (Server-side routing for web/native)
-- **Storage**: [SecureStore](https://docs.expo.dev/versions/latest/sdk/secure-store/) & [AsyncStorage](https://react-native-async-storage.github.io/async-storage/)
+| Protocol | Algorithm | Role |
+| :--- | :--- | :--- |
+| **v7 — Vault** | AEGIS-256 + AES-SIV + ML-KEM-768 | 4K media encryption |
+| **v6 — PQXDH** | ML-KEM-768 + X25519 + Double Ratchet | New chat sessions (default) |
+| **v5.5 — Quantum Elite** | ChaCha20-Poly1305 + ML-KEM-768 | PQC baseline, identity encryption |
+| **v5** | AES-256-GCM + ML-KEM-768 | Stable PQC fallback |
+| **v4** | Signal Double Ratchet | Non-PQC baseline |
+| **v3.5 — SIV** | AES-256-GCM-SIV | Write floor — nonce-misuse resistant |
 
-### Security & Cryptography
+Legacy protocols (v1–v3) are read-only via `legacy-decryption.ts`; the engine will never write them.
 
-- **Double Ratchet**: Custom implementation for asynchronous key rotation with PQC extensions.
-- **PQC Core**: `@noble/post-quantum` (ML-KEM/Kyber).
-- **Native Crypto**: `react-native-quick-crypto` for hardware-accelerated performance.
-- **Web Fallback**: `crypto-wrapper.web.ts` using SubtleCrypto and CryptoJS.
+### Identity Security Model (v5.5 Hybrid — May 2026)
+
+A key architectural invariant governs Firestore identity storage:
+
+- **`userId`** — stored as **plain text**. Firestore query compatibility requires this; per-user key derivation renders encrypted IDs permanently unqueryable.
+- **`pin`** — encrypted with **ChaCha20-Poly1305 + ML-KEM-768**. Never stored in plain text.
+- **Lazy migration** — `migrateIdentityEncryptionIfNeeded()` runs transparently on each login, repairing legacy records and stamping `profileEncryptionVersion: "v5.5"`. Idempotent; zero-cost on already-migrated profiles.
+
+---
+
+## Features
+
+- **Stealth Entry Point** — CalcX presents as a calculator. A specific numeric sequence reveals the secure workspace.
+- **Post-Quantum Encryption** — Hybrid ML-KEM-768 (NIST FIPS 203) protects against harvest-now/decrypt-later attacks.
+- **Sealed Sender Messaging** — The server stores no `senderId` in message documents. Sender identity is recovered client-side from the decrypted payload only.
+- **Hardware-Bound Key Storage** — Keys are bound to the Secure Enclave (iOS), Android Keystore (Android), or DPAPI (Windows). Not recoverable from a backup alone.
+- **Zero-Knowledge Media Vault** — Three-layer pipeline (AES-SIV → AEGIS-256 → ML-KEM-768) for encrypted 4K media.
+- **Sealed Presence** — Online status transmitted as encrypted heartbeats; the server cannot correlate presence to identity.
+- **Anti-Capture** — Screenshot and screen-recording blocked globally on Android, iOS, Web, and Desktop.
+- **Memory Hardening** — Credentials converted to `Uint8Array` immediately on capture; physically zeroed post-authentication via `secureWipe()`.
+- **Cross-Platform** — Single codebase targets Android, iOS, Web (PWA), and Desktop (Electron) via Expo SDK 54.
+
+---
+
+## Technology Stack
+
+### Application Layer
+
+| Concern | Technology |
+| :--- | :--- |
+| Framework | React Native + Expo SDK 54 |
+| Navigation | Expo Router (file-based, server-capable) |
+| State | Zustand |
+| Persistence | SecureStore (hardware-bound) + AsyncStorage |
+
+### Cryptographic Layer
+
+| Concern | Technology |
+| :--- | :--- |
+| PQC Primitives | `@noble/post-quantum` (ML-KEM-768 / Kyber) |
+| Symmetric | `@noble/ciphers` (ChaCha20-Poly1305, AES-SIV) |
+| WASM Primitives | `libsodium-wrappers` (AEGIS-256) |
+| Native Acceleration | `react-native-quick-crypto` |
+| Web Fallback | `SubtleCrypto` + `CryptoJS` |
 
 ### Backend & Infrastructure
 
-- **Database**: [Firebase Cloud Firestore](https://firebase.google.com/products/firestore) (Real-time syncing)
-- **Auth**: [Firebase Auth](https://firebase.google.com/products/auth) (Google One-Tap integration)
-- **Hosting**: [Firebase Hosting](https://firebase.google.com/products/hosting)
+| Concern | Technology |
+| :--- | :--- |
+| Real-time Database | Firebase Cloud Firestore |
+| Authentication | Firebase Auth (Google One-Tap + Email/Password) |
+| Media Storage | Firebase Storage (encrypted at-rest) |
+| Hosting | Firebase Hosting |
 
 ---
 
-## 📸 Screenshots
-
-| Security Onboarding | Stealth Calculator | Secured Chat |
-| :---: | :---: | :---: |
-| ![Security Onboarding](https://placehold.co/200x400/000000/FFFFFF/png?text=Security+Onboarding) | ![Stealth Calculator](https://placehold.co/200x400/000000/FFFFFF/png?text=Stealth+Calculator) | ![Secured Chat](https://placehold.co/200x400/000000/FFFFFF/png?text=Secured+Chat) |
-
----
-
-## 🚀 Installation & Setup
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) (v18+)
-- [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
-- [Expo Go](https://expo.dev/client) app installed on your physical device for testing.
-
-### Steps
-
-1. **Clone the Repository**
-
-   ```bash
-   git clone https://github.com/your-username/InnerOrbit-Mobile-Web-App.git
-   cd InnerOrbit-Mobile-Web-App/innerorbit-universal
-   ```
-
-2. **Install Dependencies**
-
-   ```bash
-   npm install
-   ```
-
-3. **Configure Environment**
-
-   Create a `.env` file in the root of `innerorbit-universal/` and add your Firebase configuration.
-
-4. **Launch Application**
-
-   ```bash
-   # Start Expo development server
-   npx expo start
-   ```
-
----
-
-## 💻 Usage
-
-| Platform | Command | Notes |
-| :--- | :--- | :--- |
-| **Android** | `npm run android` | Requires Android Studio / Emulator |
-| **iOS** | `npm run ios` | Requires macOS & Xcode |
-| **Web** | `npm run web` | Launches in your default browser |
-| **Desktop** | `npm run electron:start` | Launches the Electron container |
-
----
-
-## 🎓 Developer Education
-
-For a deep dive into the project's architecture, security protocols, and core concepts, refer to our comprehensive **University Syllabus**:
-
-👉 **[BeReady.md](./BeReady.md)** — *Your guide from foundations to independent mastery.*
-
----
-
-## 🏗️ Project Architecture & Ecosystem
+## Project Structure
 
 ```text
 InnerOrbit-Mobile-Web-App/
-├── BeReady.md                 # 🎓 University Syllabus (Developer Guide)
-├── README.md                  # 🌌 Project Overview
-├── INNERORBIT_KNOWLEDGE_BASE.md # 🛡️ Definitive Architectural Guide
-├── innerorbit-universal/      # 📱 Core Platform (RN + Expo + Electron)
-├── app/                       # 🛣️ Screen Routing (Expo Router)
-├── components/                # 🧩 UI Blocks (Calculator, Masking)
-├── context/                   # 🧠 Global State (Auth, Security)
-├── desktop/                   # 💻 Electron Main & Preload
-├── lib/                       # ⚙️ Logic (Cryptography, Firebase)
-│   └── __tests__/             # 🧪 Unit Test Suite (Jest)
-├── styles/                    # 🎨 Theme & Adaptive CSS
-├── oracle-server-backend/     # ☁️ Backend (Node.js + Python)
-├── download-portal-react/     # 📥 Portal (Vite + React)
-├── manager.py                 # 🛠️ Project Management CLI
-└── archive/                   # 🧪 R&D (Future Flutter Stacks)
+├── innerorbit-universal/          # Cross-platform application core
+│   ├── app/                       # Screen routing (Expo Router)
+│   ├── components/                # UI components (Calculator, Chat, Modals)
+│   ├── context/                   # React Contexts (Auth, Theme, Security)
+│   ├── hooks/                     # Custom hooks (usePasswordNudge, etc.)
+│   ├── lib/                       # Core services and cryptographic engine
+│   │   ├── encryption.ts          # Cascading encryption engine (v1–v7)
+│   │   ├── firestore-service.js   # Firestore + lazy identity migration
+│   │   ├── identity-security-service.ts  # v5.5 cloud identity encryption
+│   │   ├── memory-hardening.ts    # RAM erasure utility (secureWipe)
+│   │   ├── ratchet.ts             # Double Ratchet + PQXDH session logic
+│   │   ├── legacy-decryption.ts   # Read-only shim for v1–v3 archives
+│   │   └── __tests__/             # Jest test suite (168 tests)
+│   ├── styles/                    # Theme system (Dark / Decoy palettes)
+│   └── desktop/                   # Electron main process + auto-updater
+├── download-portal/               # Firebase-hosted distribution portal
+├── oracle-server-backend/         # Node.js + Oracle DB backend (planned)
+├── graphify-out/                  # Knowledge graph (2,775 nodes, 5,578 edges)
+├── INNERORBIT_KNOWLEDGE_BASE.md   # Definitive architectural reference
+├── SECURITY_TEST_STEPS.md         # Security verification procedures
+├── encryption_details.md          # Protocol deep-dive (v1–v7)
+└── TO-DO-LIST.md                  # Development roadmap
 ```
 
-### Core Components
+---
 
-- **📱 Universal App**: Single codebase for Android, iOS, Web, and Desktop via Expo.
-- **☁️ Oracle Backend**: Node.js API with Oracle Autonomous DB integration and signaling.
-- **📥 Portals**: Firebase and React-based gateways for distribution and onboard.
-- **🛠️ Manager CLI**: Unified Python tools for building, versioning, and environment management.
+## Getting Started
+
+### Prerequisites
+
+- Node.js v18 or later
+- npm or yarn
+- Expo Go (for physical device testing) or an Android/iOS emulator
+
+### Installation
+
+```bash
+# 1. Clone and enter the application directory
+git clone https://github.com/your-username/InnerOrbit-Mobile-Web-App.git
+cd InnerOrbit-Mobile-Web-App/innerorbit-universal
+
+# 2. Install dependencies
+npm install
+
+# 3. Configure environment
+#    Create .env and populate with your Firebase project credentials.
+#    See INNERORBIT_KNOWLEDGE_BASE.md for the full variable list.
+cp .env.example .env
+
+# 4. Start the development server
+npx expo start
+```
+
+### Platform Targets
+
+| Platform | Command | Notes |
+| :--- | :--- | :--- |
+| Android | `npm run android` | Requires Android Studio or a connected device |
+| iOS | `npm run ios` | Requires macOS + Xcode |
+| Web | `npm run web` | Opens in browser as a PWA |
+| Desktop | `npm run electron:start` | Windows / macOS Electron container |
 
 ---
 
-## 📚 Project Documentation Index
+## Testing
 
-For detailed technical guides and feature deep-dives, see:
+```bash
+cd innerorbit-universal
 
-- **[Knowledge Base](./INNERORBIT_KNOWLEDGE_BASE.md)**: The ultimate architectural and semantic guide.
-- **[Encryption Details](./encryption_details.md)**: Deep dive into protocols v1 through v7.
-- **[Security Steps](./SECURITY_TEST_STEPS.md)**: How to verify the cryptographic foundation.
-- **[TO-DO List](./TO-DO-LIST.md)**: Roadmap for future features and hardening.
-- **[Migration Plan](./docs/guides/ORACLE_MIGRATION_PLAN.md)**: Transition from Firebase to Oracle.
-- **[GDPR/CCPA](./innerorbit-universal/docs/DATA-EXPORT-INTEGRATION.md)**: Data export and deletion compliance.
+# Full suite (168 tests)
+npm test
+
+# Targeted: cryptographic sealed sender
+npm test lib/__tests__/encryption.sealed.test.ts
+
+# Targeted: v5.5 identity migration invariants
+npm test lib/__tests__/identity-migration.test.ts
+```
+
+All tests must pass before merging to `main`. Current status: **168/168 ✅**.
 
 ---
 
-## 📄 License
+## Documentation Index
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+| Document | Purpose |
+| :--- | :--- |
+| [INNERORBIT_KNOWLEDGE_BASE.md](./INNERORBIT_KNOWLEDGE_BASE.md) | Definitive architectural and semantic reference |
+| [SECURITY_TEST_STEPS.md](./SECURITY_TEST_STEPS.md) | Security verification and compliance procedures |
+| [encryption_details.md](./encryption_details.md) | Protocol deep-dive: v1 through v7 |
+| [TO-DO-LIST.md](./TO-DO-LIST.md) | Development roadmap and phase tracking |
+| [BeReady.md](./BeReady.md) | Developer education syllabus |
 
 ---
 
-Developed with ❤️ by **InnerOrbit**
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
+
+---
+
+*Developed and maintained by the InnerOrbit team.*

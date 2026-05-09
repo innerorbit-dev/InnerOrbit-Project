@@ -112,6 +112,8 @@ export const SidebarContent = ({
             displayName={profile.displayName}
             onChangeDisplayName={profile.onChangeDisplayName}
             nameStatus={profile.nameStatus}
+            photoVisibility={profile.photoVisibility}
+            handleTogglePhotoVisibility={profile.handleTogglePhotoVisibility}
             isInline={true}
           />
         );

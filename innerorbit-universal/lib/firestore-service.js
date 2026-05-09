@@ -278,7 +278,7 @@ export async function getUserProfile(uid) {
 /**
  * Updates a user profile
  * @param uid - User ID
- * @param updates - Object containing fields to update (bio, photoURL, lastSeen, etc.)
+ * @param updates - Object containing fields to update (bio, photoURL, photoVisibility, photoMetadata, etc.)
  */
 export async function updateUserProfile(uid, updates) {
   if (!uid) return;
@@ -293,7 +293,12 @@ export async function updateUserProfile(uid, updates) {
       secureUpdates.pin = cloudSyncEnabled ? IdentitySecurityService.encryptForCloud(secureUpdates.pin, uid) : "LOCAL_ONLY";
     }
 
-    await setDoc(userRef, { ...secureUpdates, updatedAt: Timestamp.now() }, { merge: true });
+    // Ensure photoVisibility is sanitized
+    if (secureUpdates.photoVisibility && !['private', 'contacts'].includes(secureUpdates.photoVisibility)) {
+        secureUpdates.photoVisibility = 'private';
+    }
+
+    await setDoc(userRef, { ...secureUpdates, updatedAt: serverTimestamp() }, { merge: true });
     Logger.log(`[Firestore] ✅ Updated profile for ${uid}`);
   } catch (error) {
     Logger.error("Error updating user profile:", error);
@@ -674,21 +679,22 @@ export async function uploadChatImage(uri, conversationId) {
 }
 
 /**
- * Uploads a profile picture to Firebase Storage
- * @param uri - Local image URI
- * @param uid - User UID context
- * @returns Download URL
+ * 🔒 SECURE PROFILE PHOTO METADATA
+ * 
+ * Instead of direct photoURL, we store v5.5 cryptographic pointers.
+ * The actual blob is in profiles/{uid}/avatar.enc
  */
-export async function uploadProfilePicture(uri, uid) {
+export async function updateProfilePhotoMetadata(uid, metadata, visibility = 'private') {
   try {
-    const response = await fetch(uri);
-    const blob = await response.blob();
-    const filename = `profiles/${uid}/${Date.now()}.jpg`;
-    const objectRef = storageRefFn(storage, filename);
-    await uploadBytes(objectRef, blob);
-    return await getDownloadURL(objectRef);
+    const userRef = doc(db, USERS_COLLECTION, uid);
+    await updateDoc(userRef, {
+      photoMetadata: metadata,
+      photoVisibility: visibility,
+      updatedAt: serverTimestamp()
+    });
+    Logger.log(`[Firestore] ✅ Secure photo metadata updated for ${uid}`);
   } catch (error) {
-    Logger.error("Error uploading profile photo:", error);
+    Logger.error("Error updating photo metadata:", error);
     throw error;
   }
 }

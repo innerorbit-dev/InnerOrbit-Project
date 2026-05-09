@@ -5,12 +5,17 @@
 import { useState, useEffect, useRef } from 'react';
 import * as firestoreService from '../lib/firestore-service';
 import { Logger } from '../lib/logger';
+import { ProfilePictureService } from '../lib/profile-picture-service';
+import { getOrCreateMyPqcKeyPair } from '../lib/ratchet-key-service';
+import { IdentitySecurityService } from '../lib/identity-security-service';
 
 export function useProfile(user, showError, showSuccess) {
   const [myUserId, setMyUserId] = useState("Loading...");
   const [userPin, setUserPin] = useState("....");
   const [userBio, setUserBio] = useState("");
   const [userPhoto, setUserPhoto] = useState(null);
+  const [photoVisibility, setPhotoVisibility] = useState('contacts'); // 'contacts' | 'private'
+  const [isDownloadingPhoto, setIsDownloadingPhoto] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [confirmLogout, setConfirmLogout] = useState(true);
   const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
@@ -47,8 +52,13 @@ export function useProfile(user, showError, showSuccess) {
             if (profile.pin) setUserPin(profile.pin);
             if (profile.bio) setUserBio(profile.bio);
             if (profile.displayName) setDisplayName(profile.displayName);
-            if (profile.photoURL) setUserPhoto(profile.photoURL);
             if (profile.confirmLogout !== undefined) setConfirmLogout(profile.confirmLogout);
+            if (profile.photoVisibility) setPhotoVisibility(profile.photoVisibility);
+
+            // 3. Handle Secure Profile Photo
+            if (profile.photoMetadata) {
+              loadSecurePhoto(user.uid, profile.photoMetadata);
+            }
           } else {
             // Profile missing. Check account age to prevent accidental overwrites.
             const creationTime = user.metadata?.creationTime;
@@ -108,7 +118,11 @@ export function useProfile(user, showError, showSuccess) {
           if (profile.pin) setUserPin(profile.pin);
           if (profile.bio) setUserBio(profile.bio);
           if (profile.displayName) setDisplayName(profile.displayName);
-          if (profile.photoURL) setUserPhoto(profile.photoURL);
+          if (profile.photoVisibility) setPhotoVisibility(profile.photoVisibility);
+          
+          if (profile.photoMetadata) {
+            loadSecurePhoto(user.uid, profile.photoMetadata);
+          }
         }
       });
       return unsub;
@@ -169,19 +183,75 @@ export function useProfile(user, showError, showSuccess) {
     setIsImagePickerVisible(true);
   };
 
+  const loadSecurePhoto = async (uid, metadata) => {
+    if (isDownloadingPhoto) return;
+    try {
+      setIsDownloadingPhoto(true);
+      const { secretKey } = await getOrCreateMyPqcKeyPair();
+      const profileKey = await IdentitySecurityService.getOrCreateProfileKey();
+      
+      const photoUri = await ProfilePictureService.getSecureProfilePicture(
+        uid,
+        metadata,
+        secretKey,
+        profileKey
+      );
+      
+      if (photoUri) {
+        setUserPhoto(photoUri);
+      }
+    } catch (e) {
+      Logger.error("[useProfile] Failed to load secure photo:", e);
+    } finally {
+      setIsDownloadingPhoto(false);
+    }
+  };
+
   const handleSelectImage = async (asset, onSuccess, onError) => {
     setIsImagePickerVisible(false);
     if (!user) return;
     try {
       setIsUpdatingProfile(true);
-      const imageUrl = await firestoreService.uploadProfilePicture(asset.uri, user.uid);
-      await firestoreService.updateUserProfile(user.uid, { photoURL: imageUrl });
-      setUserPhoto(imageUrl);
-      onSuccess("Profile picture updated!");
+      
+      const { publicKey } = await getOrCreateMyPqcKeyPair();
+      const profileKey = await IdentitySecurityService.getOrCreateProfileKey();
+      
+      const metadata = await ProfilePictureService.uploadSecureProfilePicture(
+        user.uid,
+        asset.uri,
+        publicKey,
+        profileKey
+      );
+      
+      await firestoreService.updateProfilePhotoMetadata(user.uid, metadata);
+      
+      // Update local state with the cached version immediately
+      const photoUri = await ProfilePictureService.getSecureProfilePicture(
+        user.uid,
+        metadata,
+        null, // No need for secret key if it's already in cache
+        profileKey
+      );
+      
+      if (photoUri) setUserPhoto(photoUri);
+      onSuccess("Profile picture secured and updated!");
     } catch (e) {
+      Logger.error("[useProfile] Secure upload failed:", e);
       onError(e);
     } finally {
       setIsUpdatingProfile(false);
+    }
+  };
+
+  const handleTogglePhotoVisibility = async () => {
+    if (!user) return;
+    try {
+      const newVisibility = photoVisibility === 'contacts' ? 'private' : 'contacts';
+      setPhotoVisibility(newVisibility);
+      await firestoreService.updateUserProfile(user.uid, { photoVisibility: newVisibility });
+    } catch (e) {
+      setPhotoVisibility(photoVisibility); // Revert
+      showError("Failed to update photo visibility");
     }
   };
 
@@ -206,6 +276,8 @@ export function useProfile(user, showError, showSuccess) {
     setDisplayName,
     userPhoto,
     setUserPhoto,
+    photoVisibility,
+    isDownloadingPhoto,
     confirmLogout,
     handleUpdateBio,
     onChangeBio,
@@ -213,6 +285,7 @@ export function useProfile(user, showError, showSuccess) {
     onChangeDisplayName,
     handlePickProfilePicture,
     handleToggleConfirmLogout,
+    handleTogglePhotoVisibility,
     bioStatus,
     nameStatus,
     isUpdatingProfile,
