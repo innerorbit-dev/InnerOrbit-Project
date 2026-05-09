@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, ScrollView, Pressable, Image, TextInput, Switch, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, Pressable, Image, TextInput, Switch } from "react-native";
 import { isIOS, isAndroid, isWeb, isMobile, isMobileLayout, select } from "../../utils/platform";
 import { Feather } from "@expo/vector-icons";
 // styles not used here
@@ -12,6 +12,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Logger } from "../../lib/logger";
 import { GlobalHeader } from "../ui/GlobalHeader";
 import { useAuth } from "../../context/auth-context.js";
+import { IdentitySecurityService } from "../../lib/identity-security-service";
+import { LoadingDots } from "../ui/loading-dots";
+import { PinWarningModal } from "../modals/PinWarningModal";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 
 const DetailWrapper = ({ children, isInline, THEME, title, subtitle }) => {
   if (isInline) {
@@ -82,6 +86,36 @@ export const ProfileDetailView = ({
   isInline
 }) => {
   const isMobile = isMobileLayout;
+  const [showId, setShowId] = useState(false);
+  const [decryptedId, setDecryptedId] = useState(null);
+  const [isDecryptingId, setIsDecryptingId] = useState(false);
+
+  // MEMORY HARDENING: Clear plain-text ID when hiding or unmounting
+  React.useEffect(() => {
+    if (!showId) {
+      setDecryptedId(null);
+    }
+    return () => {
+      setDecryptedId(null);
+    };
+  }, [showId]);
+
+  const handleToggleId = async () => {
+    if (!showId) {
+      setIsDecryptingId(true);
+      try {
+        const { userId } = await IdentitySecurityService.getLocalIdentity();
+        setDecryptedId(userId || myUserId); // Fallback to prop if not in secure store
+        setShowId(true);
+      } catch (error) {
+        Logger.error("[ProfileView] ID Decryption failed:", error);
+      } finally {
+        setIsDecryptingId(false);
+      }
+    } else {
+      setShowId(false);
+    }
+  };
   return (
     <DetailWrapper THEME={THEME} isInline={isInline} title="Profile Settings" subtitle="Identity and public status on the network.">
       <View style={{ flexDirection: (isLargeDesktop && !isInline) ? 'row' : 'column', gap: isInline ? 8 : 40 }}>
@@ -107,9 +141,37 @@ export const ProfileDetailView = ({
             </View>
           </Pressable>
 
-          <View style={{ marginTop: 16, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: `${THEME.primary}14`, borderRadius: 20 }}>
-            <Text style={{ color: THEME.primary, fontSize: 13, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5 }}>User ID: {myUserId}</Text>
-          </View>
+          <Pressable
+            onPress={handleToggleId}
+            disabled={isDecryptingId}
+            style={({ pressed }) => ({
+              marginTop: 16,
+              paddingHorizontal: 16,
+              paddingVertical: 8,
+              backgroundColor: `${THEME.primary}14`,
+              borderRadius: 20,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: (pressed || isDecryptingId) ? 0.8 : 1,
+              minWidth: 140,
+              minHeight: 36
+            })}
+          >
+            {isDecryptingId ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ color: THEME.primary, fontSize: 11, fontWeight: '700', marginRight: 6 }}>Loading...</Text>
+                <LoadingDots color={THEME.primary} size={3} gap={1.5} />
+              </View>
+            ) : (
+              <>
+                <Text style={{ color: THEME.primary, fontSize: 13, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5, marginRight: 8 }}>
+                  ID: {showId ? (decryptedId || '••••••••') : '••••••••'}
+                </Text>
+                <Feather name={showId ? "eye-off" : "eye"} size={12} color={THEME.primary} />
+              </>
+            )}
+          </Pressable>
         </View>
 
         {/* Right: Info Sections */}
@@ -244,6 +306,13 @@ export const ProfileDetailView = ({
           </View>
         </View>
       </View>
+      
+      <PinWarningModal 
+        visible={showWarningModal} 
+        onClose={() => setShowWarningModal(false)} 
+        onConfirm={confirmDisableCloudSync} 
+        THEME={THEME} 
+      />
     </DetailWrapper>
   );
 };
@@ -279,7 +348,68 @@ export const SecurityDetailView = ({
 }) => {
   const [isIdCopied, setIsIdCopied] = useState(false);
   const [showPin, setShowPin] = useState(false);
+  const [decryptedPin, setDecryptedPin] = useState(null);
+  const [isDecryptingPin, setIsDecryptingPin] = useState(false);
+  const [cloudSyncEnabled, setCloudSyncEnabled] = useState(true);
+  const [showWarningModal, setShowWarningModal] = useState(false);
+  
   const { user } = useAuth();
+
+  // Load Cloud Sync Status
+  React.useEffect(() => {
+    const loadSyncStatus = async () => {
+      const enabled = await IdentitySecurityService.isCloudSyncEnabled();
+      setCloudSyncEnabled(enabled);
+    };
+    loadSyncStatus();
+  }, []);
+
+  // MEMORY HARDENING: Clear plain-text PIN when hiding or unmounting
+  React.useEffect(() => {
+    if (!showPin) {
+      setDecryptedPin(null);
+    }
+    return () => {
+      setDecryptedPin(null);
+    };
+  }, [showPin]);
+
+  const handleTogglePin = async () => {
+    if (!showPin) {
+      setIsDecryptingPin(true);
+      try {
+        // Transient Decryption Flow
+        const { pin } = await IdentitySecurityService.getLocalIdentity();
+        setDecryptedPin(pin);
+        setShowPin(true);
+      } catch (error) {
+        Logger.error("[SecurityView] PIN Decryption failed:", error);
+      } finally {
+        setIsDecryptingPin(false);
+      }
+    } else {
+      setShowPin(false);
+    }
+  };
+
+  const handleToggleCloudSync = async (val) => {
+    if (!val) {
+      // Show warning modal before disabling
+      setShowWarningModal(true);
+    } else {
+      await IdentitySecurityService.setCloudSync(true);
+      setCloudSyncEnabled(true);
+      showSuccess("Cloud Identity Sync enabled");
+    }
+  };
+
+  const confirmDisableCloudSync = async () => {
+    await IdentitySecurityService.setCloudSync(false);
+    setCloudSyncEnabled(false);
+    setShowWarningModal(false);
+    showSuccess("Cloud Identity Sync disabled");
+  };
+
   const hasPassword = !!(user?.providerData?.some(p => p?.providerId === 'password') || user?.hasSetPassword);
   const isMobile = isMobileLayout;
 
@@ -304,14 +434,15 @@ export const SecurityDetailView = ({
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: isInline ? 8 : (isMobile ? 12 : 16) }}>
             {/* Card 1: View Recovery PIN (Read Only with Toggle) */}
             <Pressable
-              onPress={() => setShowPin(!showPin)}
+              onPress={handleTogglePin}
+              disabled={isDecryptingPin}
               style={({ pressed }) => ({
                 flex: 1, minWidth: (isInline || isMobile) ? '100%' : 300,
                 backgroundColor: (isInline) ? 'transparent' : THEME.surface,
                 borderRadius: isInline ? 0 : (isMobile ? 16 : 24),
                 padding: isInline ? 12 : (isMobile ? 16 : 32),
                 borderWidth: 0,
-                opacity: pressed ? 0.9 : 1
+                opacity: (pressed || isDecryptingPin) ? 0.9 : 1
               })}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
@@ -323,10 +454,17 @@ export const SecurityDetailView = ({
               <Text style={{ color: THEME.textSecondary, fontSize: isInline ? 12 : 14, marginBottom: isInline ? 8 : 24, lineHeight: isInline ? 16 : 20 }}>
                 Use this code to recover your account if you forget your password. Click to reveal.
               </Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: THEME.background, padding: isInline ? 12 : 16, borderRadius: 12, borderWidth: 0 }}>
-                <Text style={{ color: THEME.text, fontSize: isInline ? 14 : 16, fontFamily: 'monospace', fontWeight: 'bold' }}>
-                  {showPin ? (userPin || '••••••') : '••••••'}
-                </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: THEME.background, padding: isInline ? 12 : 16, borderRadius: 12, borderWidth: 0, minHeight: isInline ? 44 : 56 }}>
+                {isDecryptingPin ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Text style={{ color: THEME.textSecondary, fontSize: 13, marginRight: 8 }}>Loading...</Text>
+                    <LoadingDots color={THEME.primary} size={4} />
+                  </View>
+                ) : (
+                  <Text style={{ color: THEME.text, fontSize: isInline ? 14 : 16, fontFamily: 'monospace', fontWeight: 'bold' }}>
+                    {showPin ? (decryptedPin || '••••••') : '••••••'}
+                  </Text>
+                )}
                 <Feather name={showPin ? "eye-off" : "eye"} size={16} color={THEME.textSecondary} />
               </View>
             </Pressable>
@@ -473,6 +611,30 @@ export const SecurityDetailView = ({
 
           {keyBackupEnabled && (
             <>
+              <View style={{
+                width: '100%',
+                backgroundColor: (isInline) ? 'transparent' : THEME.surface,
+                borderRadius: isInline ? 0 : (isMobile ? 16 : 24),
+                padding: isInline ? 8 : (isMobile ? 16 : 32),
+                borderWidth: 0,
+                flexDirection: 'row', alignItems: 'center'
+              }}>
+                <View style={{ width: isInline ? 32 : 48, height: isInline ? 32 : 48, borderRadius: isInline ? 8 : 12, backgroundColor: `${THEME.primary}1A`, justifyContent: 'center', alignItems: 'center', marginRight: isInline ? 8 : 24 }}>
+                  <MaterialCommunityIcons name="cloud-sync" size={isInline ? 16 : 24} color={THEME.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: THEME.text, fontSize: 15, fontWeight: '700', marginBottom: 4 }}>Cloud Identity Sync</Text>
+                  <Text style={{ color: THEME.textSecondary, fontSize: 11, lineHeight: 14 }}>Securely backup your User ID and PIN to the cloud.</Text>
+                </View>
+                <Switch
+                  value={cloudSyncEnabled}
+                  onValueChange={handleToggleCloudSync}
+                  trackColor={{ false: THEME.border, true: THEME.primary }}
+                  thumbColor="#fff"
+                  style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+                />
+              </View>
+
               <View style={{
                 width: '100%',
                 backgroundColor: (isInline) ? 'transparent' : THEME.surface,
@@ -632,6 +794,32 @@ export const PrivacyDetailView = ({
           )}
         </Pressable>
       </View>
+      
+      {/* Sealed Presence Settings */}
+      <View style={{ marginTop: isInline ? 24 : 40 }}>
+        <Text style={{ color: THEME.text, fontSize: isInline ? 18 : 24, fontWeight: '800', marginBottom: isInline ? 12 : 20 }}>Sealed Presence</Text>
+        <View style={{ backgroundColor: THEME.surface, borderRadius: isInline ? 16 : 24, padding: isInline ? 12 : 24 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flex: 1, marginRight: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Feather name="clock" size={16} color={THEME.primary} style={{ marginRight: 8 }} />
+                <Text style={{ color: THEME.text, fontSize: 16, fontWeight: '700' }}>Share Last Seen</Text>
+              </View>
+              <Text style={{ color: THEME.textSecondary, fontSize: 13, lineHeight: 18 }}>
+                Allow contacts to see when you were last active. Status is encrypted and only visible to trusted contacts.
+              </Text>
+            </View>
+            <Switch
+              value={privacy?.sharePresence}
+              onValueChange={privacy?.handleToggleSharePresence}
+              trackColor={{ false: THEME.border, true: THEME.primary }}
+              thumbColor="#fff"
+              style={isInline ? { transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] } : {}}
+            />
+          </View>
+        </View>
+      </View>
+
 
       {/* Auto Safety Config */}
       {privacyLevel === 3 && (

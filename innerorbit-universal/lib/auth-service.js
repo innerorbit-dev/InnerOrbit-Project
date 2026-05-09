@@ -4,6 +4,7 @@ import { findUserByCredentials } from "./user-id-generator";
 import { updateUserPresence } from "./firestore-service";
 import { publishMyKeysOnLogin } from "./ratchet-key-service";
 import { Logger } from "./logger";
+import { useSensitiveString } from "./memory-hardening";
 
 /**
  * Signs in a user using their User ID and PIN combination
@@ -14,36 +15,35 @@ import { Logger } from "./logger";
  * @returns Promise that resolves with the User Profile object
  */
 export async function signInWithPin(userId, pin) {
-  try {
-    // 1. Verify Credentials
-    const userProfile = await findUserByCredentials(userId, pin);
-
-    if (!userProfile) {
-      throw new Error("Invalid User ID or PIN combination");
-    }
-
-    // 2. Initialize Session Presence (Mark as Online)
-    // We do this immediately to indicate active status
+  return await useSensitiveString(pin, async (pinBuf) => {
     try {
-      await updateUserPresence(userProfile.uid, true);
-      startSessionHeartbeat(userProfile.uid);
-    } catch (presenceError) {
-      Logger.warn("[AuthService] Presence update failed (non-fatal):", presenceError);
+      // 1. Verify Credentials using the buffer-converted string
+      const userProfile = await findUserByCredentials(userId, pinBuf.toString());
+
+      if (!userProfile) {
+        throw new Error("Invalid User ID or PIN combination");
+      }
+
+      // 2. Initialize Session Presence (Mark as Online)
+      try {
+        await updateUserPresence(userProfile.uid, true);
+        startSessionHeartbeat(userProfile.uid);
+      } catch (presenceError) {
+        Logger.warn("[AuthService] Presence update failed (non-fatal):", presenceError);
+      }
+
+      // 3. Publish DH + v6 public keys
+      publishMyKeysOnLogin(userProfile.uid).catch(e =>
+        Logger.warn("[AuthService] Key publish failed (non-fatal):", e?.message)
+      );
+
+      return userProfile;
+
+    } catch (error) {
+      Logger.error("PIN sign in error:", error);
+      throw error;
     }
-
-    // 3. Publish DH + v6 public keys to Firestore so partners can initiate ratchet sessions.
-    //    Non-blocking — runs in background so login UX is instant.
-    publishMyKeysOnLogin(userProfile.uid).catch(e =>
-      Logger.warn("[AuthService] Key publish failed (non-fatal):", e?.message)
-    );
-
-    // 4. Return the authenticated profile
-    return userProfile;
-
-  } catch (error) {
-    Logger.error("PIN sign in error:", error);
-    throw error;
-  }
+  });
 }
 
 /**

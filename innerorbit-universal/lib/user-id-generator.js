@@ -1,6 +1,8 @@
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "./firebase";
 import { randomBytes } from "./crypto-wrapper";
+import { IdentitySecurityService } from "./identity-security-service";
+import { Logger } from "./logger";
 
 /**
  * User ID Generator Utility for InnerOrbit
@@ -273,44 +275,65 @@ export async function findUserByCredentials(userId, pin) {
       return null;
     }
 
-    // 1. Try Primary PIN
-    const primaryQuery = query(
+    // 1. Fetch user by userId ONLY (to support encrypted PINs in cloud)
+    const q = query(
       collection(db, "users"),
-      where("userId", "==", userId),
-      where("pin", "==", pin)
+      where("userId", "==", userId)
     );
-    const primarySnap = await getDocs(primaryQuery);
+    const snap = await getDocs(q);
 
-    if (!primarySnap.empty) {
+    if (snap.empty) {
+      return null;
+    }
+
+    // There should theoretically be only one user with this ID
+    const userDoc = snap.docs[0];
+    const userData = userDoc.data();
+    const userUid = userDoc.id;
+
+    // 2. Verify Primary PIN
+    let isPrimaryMatch = false;
+    if (userData.pin === pin) {
+      // Legacy plain-text match
+      isPrimaryMatch = true;
+    } else if (userData.pin && userData.pin.includes(":")) {
+      // Encrypted PIN match (v5.5+)
+      const decryptedPin = IdentitySecurityService.decryptFromCloud(userData.pin, userUid);
+      if (decryptedPin === pin) {
+        isPrimaryMatch = true;
+      }
+    }
+
+    if (isPrimaryMatch) {
       return {
-        uid: primarySnap.docs[0].id,
+        uid: userUid,
         isDecoySession: false,
-        ...primarySnap.docs[0].data(),
+        ...userData,
       };
     }
 
-    // 2. Try Decoy PIN (Camouflage Mode)
-    const decoyQuery = query(
-      collection(db, "users"),
-      where("userId", "==", userId),
-      where("decoyPin", "==", pin)
-    );
-    const decoySnap = await getDocs(decoyQuery);
+    // 3. Verify Decoy PIN (Camouflage Mode)
+    let isDecoyMatch = false;
+    if (userData.decoyPin === pin) {
+      isDecoyMatch = true;
+    } else if (userData.decoyPin && userData.decoyPin.includes(":")) {
+      const decryptedDecoyPin = IdentitySecurityService.decryptFromCloud(userData.decoyPin, userUid);
+      if (decryptedDecoyPin === pin) {
+        isDecoyMatch = true;
+      }
+    }
 
-    if (!decoySnap.empty) {
+    if (isDecoyMatch) {
       return {
-        uid: decoySnap.docs[0].id,
+        uid: userUid,
         isDecoySession: true,
-        ...decoySnap.docs[0].data(),
+        ...userData,
       };
     }
 
     return null;
   } catch (error) {
-    console.error("Error finding user by credentials:", error);
-    console.error("Error code:", error.code);
-    console.error("Error message:", error.message);
-    // Silently return null on error
+    Logger.error("[Auth] findUserByCredentials failed:", error);
     return null;
   }
 }

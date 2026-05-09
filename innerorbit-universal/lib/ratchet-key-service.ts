@@ -36,6 +36,7 @@ import { getRatchetSession, saveRatchetSession, DEFAULT_ENCRYPTION_CAPABILITIES 
 import { initializeV6Session, getV6Session } from "./encryption-v6";
 import { ml_kem768, ed25519Sign, createPublicKey, createPrivateKey } from "./crypto-wrapper";
 import { Logger } from "./logger";
+import { PresenceService } from "./presence-service";
 
 // ─── Storage Keys ──────────────────────────────────────────────────────────────
 const DH_PUBLIC_KEY_STORAGE  = "innerorbit_dh_pub";
@@ -330,6 +331,9 @@ export async function initializeRatchetIfNeeded(
     // ── Persist the session (encrypted with device key on mobile, AsyncStorage on web) ──
     await saveRatchetSession(conversationId, state);
 
+    // 🛡️ SEAMLESS PRESENCE: Share Profile Key encrypted with this shared secret
+    PresenceService.shareProfileKeyWithPartner(conversationId, sharedSecret.toString("hex")).catch(() => {});
+
     Logger.log(`[RatchetKeyService] ✅ v4 Ratchet session ready for ${conversationId.substring(0, 8)}...`);
     return true;
   } catch (e: any) {
@@ -419,6 +423,9 @@ export async function initializeV6IfNeeded(
       ownPqcKeyPair: { publicKey: myPqcPub, secretKey: myPqcPriv }
     });
 
+    // 🛡️ SEAMLESS PRESENCE: Share Profile Key encrypted with this shared secret
+    PresenceService.shareProfileKeyWithPartner(conversationId, sharedSecret.toString("hex")).catch(() => {});
+
     Logger.log(`[RatchetKeyService] ✅ v6 PQXDH session ready for ${conversationId.substring(0, 8)}...`);
     return true;
   } catch (e: any) {
@@ -436,4 +443,24 @@ export async function initializeV6IfNeeded(
 export async function hasRatchetSession(conversationId: string): Promise<boolean> {
   const state = await getRatchetSession(conversationId);
   return state !== null;
+}
+
+/**
+ * Returns the shared secret for a given partner.
+ * Useful for deriving presence/typing keys on the fly.
+ */
+export async function getConversationSharedSecret(partnerUid: string): Promise<Buffer | null> {
+  try {
+    const { fetchDhPublicKey } = await getFirestoreFns();
+    const partnerPubB64 = await fetchDhPublicKey(partnerUid);
+    if (!partnerPubB64) return null;
+
+    const { privateKey: myPrivateKey } = await getOrCreateMyDhKeyPair();
+    const partnerPublicKey = Buffer.from(partnerPubB64, "base64");
+    
+    return await tryDiffieHellman(myPrivateKey, partnerPublicKey);
+  } catch (e) {
+    Logger.error("[RatchetKeyService] Failed to get shared secret", e);
+    return null;
+  }
 }

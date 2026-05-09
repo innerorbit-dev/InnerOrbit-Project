@@ -226,25 +226,11 @@ export const SettingsSidebar = ({
                     />
                 </SettingsSection>
 
-                {/* Account Section */}
-                <SettingsSection label="ACCOUNT & SECURITY" THEME={THEME} searchQuery={searchQuery}>
+                {/* Privacy Section */}
+                <SettingsSection label="PRIVACY & SAFETY" THEME={THEME} searchQuery={searchQuery}>
                     <CardItem
                         THEME={THEME} isDesktop={isDesktop} renderInlineDetail={renderInlineDetail}
-                        icon="lock" color="#3B82F6" label="Account Security" desc="Password, Recovery PIN, Background Sync"
-                        viewTarget="security"
-                        onPress={() => setDesktopDetailView('security')}
-                        active={selectedView === 'security'}
-                    />
-                    <CardItem
-                        THEME={THEME} isDesktop={isDesktop} renderInlineDetail={renderInlineDetail}
-                        icon="monitor-cellphone" color="#3B82F6" label="Linked Devices" desc="Link Desktop or Web via QR"
-                        onPress={() => ui?.setShowScanner(true)}
-                        rightElement={null}
-                        iconFamily="MaterialCommunityIcons"
-                    />
-                    <CardItem
-                        THEME={THEME} isDesktop={isDesktop} renderInlineDetail={renderInlineDetail}
-                        icon="eye-off" color="#8B5CF6" label="Social Privacy" desc="Hide chats & contacts"
+                        icon="eye-off" color="#8B5CF6" label="Social Privacy" desc="Hide presence, chats & visibility"
                         viewTarget="privacy"
                         onPress={() => setDesktopDetailView('privacy')}
                         active={selectedView === 'privacy'}
@@ -255,6 +241,24 @@ export const SettingsSidebar = ({
                         viewTarget="stealth"
                         onPress={() => setDesktopDetailView('stealth')}
                         active={selectedView === 'stealth'}
+                    />
+                </SettingsSection>
+
+                {/* Account & Security Section */}
+                <SettingsSection label="ACCOUNT SECURITY" THEME={THEME} searchQuery={searchQuery}>
+                    <CardItem
+                        THEME={THEME} isDesktop={isDesktop} renderInlineDetail={renderInlineDetail}
+                        icon="lock" color="#3B82F6" label="Security Details" desc="Credentials, Pin & Hardware Lock"
+                        viewTarget="security"
+                        onPress={() => setDesktopDetailView('security')}
+                        active={selectedView === 'security'}
+                    />
+                    <CardItem
+                        THEME={THEME} isDesktop={isDesktop} renderInlineDetail={renderInlineDetail}
+                        icon="monitor-cellphone" color="#3B82F6" label="Linked Devices" desc="Link Desktop or Web via QR"
+                        onPress={() => ui?.setShowScanner(true)}
+                        rightElement={null}
+                        iconFamily="MaterialCommunityIcons"
                         style={{ borderBottomWidth: 0 }}
                     />
                 </SettingsSection>

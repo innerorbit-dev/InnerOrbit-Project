@@ -67,6 +67,31 @@ export function encrypt(text: string, secretKey: string, pqcPublicKey?: Uint8Arr
 }
 
 /**
+ * 🛠️ BINARY-SAFE AES-GCM-SIV (v3.5)
+ * Specialized for high-throughput media payloads.
+ */
+export async function encryptSivBinary(data: Uint8Array, secretKey: Buffer): Promise<{ ciphertext: Uint8Array, iv: Uint8Array, tag: Uint8Array }> {
+    try {
+        // Derive deterministic IV from payload (Synthetic IV)
+        const iv = createHmac('sha256', secretKey).update(data).digest().slice(0, GCM_IV_LENGTH);
+        const cipher = createCipheriv("aes-256-gcm", secretKey as any, iv as any);
+        
+        const encrypted = cipher.update(data);
+        const final = cipher.final();
+        const tag = cipher.getAuthTag();
+        
+        const combined = new Uint8Array(encrypted.length + final.length);
+        combined.set(encrypted);
+        combined.set(final, encrypted.length);
+        
+        return { ciphertext: combined, iv, tag };
+    } catch (e) {
+        Logger.error("[encryptSivBinary] Critical failure", e);
+        throw e;
+    }
+}
+
+/**
  * Core Synchronous Decryption (Level 3-6)
  */
 export function decrypt(ciphertext: string, secretKey: string, pqcSecretKey?: Uint8Array): string {
@@ -121,4 +146,26 @@ export function decrypt(ciphertext: string, secretKey: string, pqcSecretKey?: Ui
     Logger.error("[decrypt] Primary decryption failed, trying legacy recovery...", error);
     return decryptLegacy(ciphertext, secretKey);
   }
+}
+
+/**
+ * 🛠️ BINARY-SAFE AES-GCM-SIV DECRYPTION
+ */
+export async function decryptSivBinary(ciphertext: Uint8Array, secretKey: Buffer, iv: Uint8Array, tag: Uint8Array): Promise<Uint8Array> {
+    try {
+        const decipher = createDecipheriv("aes-256-gcm", secretKey as any, iv as any);
+        decipher.setAuthTag(tag as any);
+        
+        const decrypted = decipher.update(ciphertext);
+        const final = decipher.final();
+        
+        const combined = new Uint8Array(decrypted.length + final.length);
+        combined.set(decrypted);
+        combined.set(final, decrypted.length);
+        
+        return combined;
+    } catch (e) {
+        Logger.error("[decryptSivBinary] Decryption failed", e);
+        throw new Error("MEDIA_DECRYPTION_FAILED");
+    }
 }

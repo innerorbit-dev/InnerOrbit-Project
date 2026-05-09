@@ -1,9 +1,10 @@
 /** Purpose: Branded loading overlay shown during app unlocking transitions. */
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Animated, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, Animated, Image } from 'react-native';
 import { isWeb, isIOS } from '../../utils/platform';
 import { Feather } from '@expo/vector-icons';
 import { useAppTheme } from '../../store/themeStore';
+import { LoadingDots } from './loading-dots';
 
 const LOGO_IMG = require("../../assets/InnerOrbit-Logo.png");
 
@@ -59,7 +60,7 @@ export const ShieldOverlay = ({ visible, onAnimationComplete }) => {
                 </Text>
 
                 <View style={styles.loaderContainer}>
-                    <ActivityIndicator size="large" color={accentColor} />
+                    <LoadingDots color={accentColor} size={6} gap={3} />
                 </View>
             </View>
         </Animated.View>

@@ -199,7 +199,7 @@ export const SettingsView = ({
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: THEME.text, fontSize: 15, fontWeight: '600' }}>Social Privacy</Text>
-              <Text style={{ color: THEME.textSecondary, fontSize: 12 }}>Who can see you?</Text>
+              <Text style={{ color: THEME.textSecondary, fontSize: 12 }}>Hide presence, chats & visibility</Text>
             </View>
             <Feather name="chevron-right" size={18} color={THEME.textSecondary} />
           </Pressable>
@@ -344,7 +344,7 @@ export const SettingsView = ({
             </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: THEME.text, fontSize: 15, fontWeight: '600' }}>Security Details</Text>
-              <Text style={{ color: THEME.textSecondary, fontSize: 12 }}>PIN, Recovery & Password</Text>
+              <Text style={{ color: THEME.textSecondary, fontSize: 12 }}>Credentials, Pin & Hardware Lock</Text>
             </View>
             <Feather name="chevron-right" size={18} color={THEME.textSecondary} />
           </Pressable>

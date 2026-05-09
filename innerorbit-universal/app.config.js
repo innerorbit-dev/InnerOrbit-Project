@@ -70,7 +70,8 @@ module.exports = {
             ],
             "expo-secure-store",
             "expo-web-browser",
-            "expo-background-task"
+            "expo-background-task",
+            "expo-document-picker"
         ],
         notification: {
             icon: "./assets/icon.png",

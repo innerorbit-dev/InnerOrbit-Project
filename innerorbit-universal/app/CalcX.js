@@ -16,6 +16,7 @@ import { useAppTheme } from "../store/themeStore";
 import { useUpdates } from "../hooks/useUpdates";
 import UpdateWalkthrough from "../components/update-walkthrough";
 import { ErrorBoundary as LocalErrorBoundary } from '../components/error-boundary';
+import { DEV_MODE_PLAIN_IDENTITY } from "../lib/identity-security-service";
 
 // Accept onSwitchMode prop for seamless state-based switching
 export default function GameScreen({ onSwitchMode }) {
@@ -94,29 +95,29 @@ function MobileGames({ onSwitchMode }) {
   const MOBILE_DARK = {
     bg: "#000000",              // [⬛] Main screen background (AMOLED black)
     display: "#000000",         // [⬛] Calculator result area background
-    keypad: "#000000",          // [⬛] Keypad section background
-    keypadGradient: ["#000000", "#000000"], // [⬛] Pure black gradient
-    btnNumber: ["#121212", "#000000"], // [🌑] Near black -> [⬛] Pure black
-    btnOp: ["#fb7185", "#be123c"],     // [🌸] Rose top -> [🛑] Hot crimson bottom
-    btnEqual: ["#09cef1f7", "#0891b2"], // [💎] Cyan glow -> [🔵] Deep teal bottom
-    btnTop: ["#475569", "#1e293b"],    // [🌑] Deep slate -> [🌑] Darker slate
-    btnSci: ["#1e293b", "#000000"],    // [🌑] Slate -> [⬛] Pure black
-    textMain: "#FFFFFF",               // [⬜] Vivid White text
+    keypad: "#050505",          // [⬛] Near-black depth
+    keypadGradient: ["#0a0a0a", "#000000"], // [🌌] Subtle deep space gradient
+    btnNumber: ["#1e1e1e", "#0f0f0f"], // [🌑] Premium metallic slate
+    btnOp: ["#ec4899", "#9d174d"],     // [🌸] Vibrant Pink -> Deep Rose
+    btnEqual: ["#06b6d4", "#0891b2"], // [💎] Electric Cyan -> Deep Teal
+    btnTop: ["#334155", "#1e293b"],    // [🌑] Sophisticated Slate
+    btnSci: ["#1e293b", "#0a0a0a"],    // [🌑] Slate -> Deep Space
+    textMain: "#F8FAFC",               // [⬜] Off-white for comfort
     textAlt: "#94A3B8",                // [🩶] Muted slate text
-    border: "transparent",             // [🚫] No borders for cleaner AMOLED look
+    border: "transparent",             // [🚫] No borders
   };
 
   const MOBILE_LIGHT = {
-    bg: "#FFFFFF",              // [⬜] Pure white background
+    bg: "#F8FAFC",              // [⬜] Ultra-clean slate white
     display: "#FFFFFF",         // [⬜] Pure white for display
-    keypad: "#FFFFFF",          // [⬜] Pure white for keyboard base
-    keypadGradient: ["#FFFFFF", "#F8FAFC"], // [⬜] Pure White sheen
-    btnNumber: ["#FFFFFF", "#F1F5F9"], // [⬜] White top -> [⬜] Slate shadow
-    btnOp: ["#FB7185", "#E11D48"],     // [🌸] Rose pink -> [🛑] Vibrant crimson
-    btnEqual: ["#22D3EE", "#06B6D4"],  // [💎] Electric cyan -> [🔵] Deep ocean blue
-    btnTop: ["#94A3B8", "#64748B"],    // [🩶] Cool silver -> [🌑] Muted slate
-    btnSci: ["#F8FAFC", "#E2E8F0"],    // [⬜] White sheen -> [🩶] Soft slate
-    textMain: "#000000",               // [⬛] Pure black text for high contrast
+    keypad: "#F1F5F9",          // [⬜] Light slate for depth
+    keypadGradient: ["#FFFFFF", "#F1F5F9"], // [⬜] Soft sheen
+    btnNumber: ["#FFFFFF", "#F8FAFC"], // [⬜] Pure white top
+    btnOp: ["#F472B6", "#DB2777"],     // [🌸] Vibrant Pink -> Rose
+    btnEqual: ["#22D3EE", "#0891B2"],  // [💎] Cyan -> Deep Teal
+    btnTop: ["#CBD5E1", "#94A3B8"],    // [🩶] Soft silver -> Muted slate
+    btnSci: ["#F1F5F9", "#E2E8F0"],    // [⬜] Slate sheen
+    textMain: "#0F172A",               // [⬛] Deep slate for contrast
     textAlt: "#64748B",                // [🌑] Slate secondary text
     border: "transparent",             // [🚫] No borders
   };
@@ -174,6 +175,22 @@ function MobileGames({ onSwitchMode }) {
 
       {/* Main Container */}
       <>
+        {DEV_MODE_PLAIN_IDENTITY && (
+          <View style={{
+            backgroundColor: '#EF4444',
+            paddingVertical: 8,
+            paddingHorizontal: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100
+          }}>
+            <MaterialCommunityIcons name="shield-off" size={16} color="#FFFFFF" style={{ marginRight: 8 }} />
+            <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' }}>
+              SECURITY ALERT: Identity saved in PLAIN TEXT (Dev Mode)
+            </Text>
+          </View>
+        )}
         <View style={{ flex: 1, width: '100%', flexDirection: isLandscape ? 'row' : 'column' }}>
           <CalculatorComponent
             onSwitchMode={onSwitchMode}

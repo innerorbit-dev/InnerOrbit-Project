@@ -132,6 +132,9 @@ async function createWindow() {
     // Load from local server instead of file://
     Logger.log(`Loading URL: ${startUrl}`);
     mainWindow.loadURL(startUrl);
+    
+    // 🛡️ SECURITY: Prevent Screenshots and Screen Recording on Windows Desktop
+    mainWindow.setContentProtection(true);
 
     // If first run, use specialized window size/style for installer feel
     if (isFirstRun) {

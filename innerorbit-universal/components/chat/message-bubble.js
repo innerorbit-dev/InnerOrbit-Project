@@ -5,6 +5,7 @@ import { select, isWeb } from "../../utils/platform";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import * as Clipboard from 'expo-clipboard';
 import { MediaVaultService } from "../../lib/media-vault-service";
+import * as Sharing from 'expo-sharing';
 
 const ACCOUNT_IMG = require('../../assets/account.webp');
 
@@ -54,10 +55,12 @@ const ReactionPill = ({ emoji, count, theme, isOwn }) => {
     );
 };
 
-const VaultMediaRenderer = ({ vaultId, theme, isOwn }) => {
+const VaultMediaRenderer = ({ vaultId, theme, isOwn, mimeType = 'image/jpeg' }) => {
     const [decryptedUri, setDecryptedUri] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(false);
+
+    const isImage = mimeType?.startsWith('image/');
 
     useEffect(() => {
         let isMounted = true;
@@ -80,9 +83,24 @@ const VaultMediaRenderer = ({ vaultId, theme, isOwn }) => {
         return () => { isMounted = false; };
     }, [vaultId]);
 
+    const handleOpenDocument = async () => {
+        if (!decryptedUri) return;
+        try {
+            const canShare = await Sharing.isAvailableAsync();
+            if (canShare) {
+                await Sharing.shareAsync(decryptedUri);
+            } else {
+                Alert.alert("Error", "No application available to open this file type.");
+            }
+        } catch (err) {
+            console.error("[VaultRenderer] Failed to open document:", err);
+            Alert.alert("Vault Error", "Could not open document safely.");
+        }
+    };
+
     if (loading) {
         return (
-            <View style={{ width: 200, height: 200, backgroundColor: 'rgba(0,0,0,0.05)', justifyContent: 'center', alignItems: 'center', borderRadius: 12 }}>
+            <View style={{ width: 200, height: 100, backgroundColor: 'rgba(0,0,0,0.05)', justifyContent: 'center', alignItems: 'center', borderRadius: 12 }}>
                 <ActivityIndicator color={isOwn ? '#fff' : theme.primary} />
                 <Text style={{ color: isOwn ? '#fff' : theme.textSecondary, fontSize: 10, marginTop: 8, opacity: 0.7 }}>Unlocking Vault...</Text>
             </View>
@@ -91,20 +109,71 @@ const VaultMediaRenderer = ({ vaultId, theme, isOwn }) => {
 
     if (error) {
         return (
-            <View style={{ width: 200, height: 200, backgroundColor: 'rgba(239, 68, 68, 0.1)', justifyContent: 'center', alignItems: 'center', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }}>
+            <View style={{ width: 200, height: 100, backgroundColor: 'rgba(239, 68, 68, 0.1)', justifyContent: 'center', alignItems: 'center', borderRadius: 12, borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.2)' }}>
                 <Feather name="shield-off" size={24} color="#EF4444" />
                 <Text style={{ color: '#EF4444', fontSize: 10, marginTop: 8 }}>Vault Access Denied</Text>
             </View>
         );
     }
 
-    return (
-        <View style={{ width: 200, height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 2 }}>
-            <Image source={{ uri: decryptedUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-            <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 8 }}>
-                <Feather name="shield" size={12} color="#10B981" />
+    if (isImage) {
+        return (
+            <View style={{ width: 200, height: 200, borderRadius: 12, overflow: 'hidden', marginVertical: 2 }}>
+                <Image source={{ uri: decryptedUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                <View style={{ position: 'absolute', top: 8, right: 8, backgroundColor: 'rgba(0,0,0,0.5)', padding: 4, borderRadius: 8 }}>
+                    <Feather name="shield" size={12} color="#10B981" />
+                </View>
             </View>
-        </View>
+        );
+    }
+
+    // Document Renderer
+    return (
+        <Pressable 
+            onPress={handleOpenDocument}
+            style={({ pressed }) => ({
+                width: 200,
+                padding: 12,
+                backgroundColor: isOwn ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.05)',
+                borderRadius: 12,
+                flexDirection: 'row',
+                alignItems: 'center',
+                opacity: pressed ? 0.7 : 1,
+                marginVertical: 4
+            })}
+        >
+            <View style={{ 
+                width: 40, 
+                height: 40, 
+                backgroundColor: isOwn ? 'rgba(255,255,255,0.2)' : 'rgba(59, 130, 246, 0.1)', 
+                borderRadius: 8, 
+                justifyContent: 'center', 
+                alignItems: 'center',
+                marginRight: 12
+            }}>
+                <Feather 
+                    name={mimeType?.includes('pdf') ? "file-text" : "file"} 
+                    size={20} 
+                    color={isOwn ? '#fff' : theme.primary} 
+                />
+            </View>
+            <View style={{ flex: 1 }}>
+                <Text numberOfLines={1} style={{ 
+                    color: isOwn ? '#fff' : theme.text, 
+                    fontSize: 13, 
+                    fontWeight: '600' 
+                }}>
+                    {mimeType?.split('/')[1]?.toUpperCase() || 'DOCUMENT'}
+                </Text>
+                <Text style={{ 
+                    color: isOwn ? 'rgba(255,255,255,0.7)' : theme.textSecondary, 
+                    fontSize: 11 
+                }}>
+                    Securely Encrypted
+                </Text>
+            </View>
+            <Feather name="external-link" size={14} color={isOwn ? 'rgba(255,255,255,0.5)' : theme.textSecondary} />
+        </Pressable>
     );
 };
 
@@ -311,7 +380,12 @@ const MessageBubble = ({
                             <Image source={{ uri: item.encryptedText }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                         </View>
                     ) : item.type === 'vault_media' ? (
-                        <VaultMediaRenderer vaultId={item.encryptedText} theme={theme} isOwn={isOwnMessage} />
+                        <VaultMediaRenderer 
+                            vaultId={item.encryptedText} 
+                            theme={theme} 
+                            isOwn={isOwnMessage} 
+                            mimeType={item.mimeType}
+                        />
                     ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
                             <Text style={[

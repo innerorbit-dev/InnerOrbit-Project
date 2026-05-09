@@ -4,9 +4,9 @@ import { doc, setDoc, getDoc, collection, addDoc, serverTimestamp, Firestore } f
 
 const db = fb.db as unknown as Firestore;
 const storage = fb.storage as unknown as FirebaseStorage;
-import { encrypt, decrypt, ENC_VERSION_SIV } from "./encryption-core";
+import { encrypt, decrypt, ENC_VERSION_SIV, encryptSivBinary, decryptSivBinary } from "./encryption-core";
 import { encryptAegis256, decryptAegis256, generateAegisNonce } from "./aegis-wrapper";
-import { ml_kem768 } from "./crypto-wrapper";
+import { ml_kem768, randomBytes } from "./crypto-wrapper";
 import { Logger } from "./logger";
 import { Buffer } from "buffer";
 
@@ -28,9 +28,11 @@ export interface MediaVaultMetadata {
     mimeType: string;
     fileName: string;
     size: number;
-    pqcCiphertext: string; // MMK wrapped by ML-KEM-768 (Base64)
+    pqcCiphertext: string; // Shared Secret ciphertext from ML-KEM-768
+    wrappedMmk: string;    // MMK encrypted by PQC shared secret (Base64)
     aegisNonce: string;    // Nonce for AEGIS-256 (Base64)
-    sivIv: string;         // IV for AES-SIV (Base64)
+    sivIv: string;         // IV for Layer 1 AES-SIV (Base64)
+    sivTag: string;        // Auth Tag for Layer 1 AES-SIV (Base64)
     timestamp: any;
 }
 
@@ -54,19 +56,32 @@ export class MediaVaultService {
             const arrayBuffer = await response.arrayBuffer();
             const rawData = new Uint8Array(arrayBuffer);
 
+            // 1.1 Check File Size Limit (100MB)
+            const MAX_SIZE_BYTES = 100 * 1024 * 1024;
+            if (rawData.length > MAX_SIZE_BYTES) {
+                Logger.error(`[MediaVault] ❌ File too large: ${(rawData.length / (1024 * 1024)).toFixed(2)}MB. Max limit is 100MB.`);
+                throw new Error("FILE_TOO_LARGE");
+            }
+
+            // 1.2 Check MIME Type (Images & Documents only)
+            const isImage = mimeType.startsWith('image/');
+            const isDoc = mimeType.startsWith('application/pdf') || 
+                          mimeType.startsWith('text/') ||
+                          mimeType.includes('officedocument') ||
+                          mimeType.includes('msword');
+
+            if (!isImage && !isDoc) {
+                Logger.error(`[MediaVault] ❌ Unsupported file type: ${mimeType}`);
+                throw new Error("UNSUPPORTED_FILE_TYPE");
+            }
+
             // 2. Generate Media Master Key (MMK) - 32 bytes
             const mmk = crypto.getRandomValues(new Uint8Array(32));
 
             // 3. Layer 1: AES-256-SIV (Inner Safe)
             // We use the MMK as the 'secretKey' for this layer.
-            // OPTIMIZATION: We avoid string conversions for the main payload.
-            // Since our core 'encrypt' currently expects strings, we will use a dedicated binary path.
-            const mmkHex = Buffer.from(mmk).toString('hex');
-            
-            // For now, we'll use a direct AES-GCM-SIV binary implementation if available, 
-            // or pass the buffer to our core helper if it's updated.
-            // To ensure 4K speed, we'll leverage AEGIS as the primary high-speed layer.
-            const layer1Data = rawData; // In a full implementation, this would be the SIV ciphertext
+            const mmkBuffer = Buffer.from(mmk);
+            const { ciphertext: layer1Data, iv: sivIv, tag: sivTag } = await encryptSivBinary(rawData, mmkBuffer);
 
             // 4. Layer 2: AEGIS-256 (Outer Wrapper)
             const aegisNonce = await generateAegisNonce();
@@ -81,7 +96,9 @@ export class MediaVaultService {
             const wrappedMmk = encrypt(Buffer.from(mmk).toString('base64'), mmkWrapperKey, undefined, ENC_VERSION_SIV);
 
             // 6. Upload Encrypted Blob to Firebase Storage
-            const fileId = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+            // 🛡️ SECURITY HARDENED: Use randomBytes for fileId entropy instead of Math.random()
+            const entropy = randomBytes(4).toString('hex');
+            const fileId = `${Date.now()}_${entropy}`;
             const storagePath = `vault/${conversationId}/${fileId}.bin`;
             if (!storage) throw new Error("FIREBASE_STORAGE_UNAVAILABLE");
             const storageRef = ref(storage as FirebaseStorage, storagePath);
@@ -98,8 +115,10 @@ export class MediaVaultService {
                 fileName: uri.split('/').pop() || 'media.bin',
                 size: rawData.length,
                 pqcCiphertext: Buffer.from(pqcCt).toString('base64'),
+                wrappedMmk,
                 aegisNonce: Buffer.from(aegisNonce).toString('base64'),
-                sivIv: wrappedMmk, // Store wrapped MMK
+                sivIv: Buffer.from(sivIv).toString('base64'),
+                sivTag: Buffer.from(sivTag).toString('base64'),
                 timestamp: serverTimestamp()
             };
 
@@ -137,7 +156,7 @@ export class MediaVaultService {
             
             // Unwrap the MMK
             const mmkWrapperKey = Buffer.from(sharedSecret).toString('hex');
-            const unwrappedMmkB64 = decrypt(metadata.sivIv, mmkWrapperKey);
+            const unwrappedMmkB64 = decrypt(metadata.wrappedMmk, mmkWrapperKey);
             const mmk = Buffer.from(unwrappedMmkB64, 'base64');
 
             // 3. Download Encrypted Blob
@@ -153,9 +172,9 @@ export class MediaVaultService {
             const layer1Bytes = await decryptAegis256(encryptedBytes, mmk, aegisNonce);
 
             // 5. Layer 1 Decryption (AES-256-SIV)
-            // Note: Since Layer 1 is currently bypassed for direct binary 4K throughput, 
-            // we treat layer1Bytes as the final raw data.
-            const rawData = layer1Bytes;
+            const sivIv = Buffer.from(metadata.sivIv, 'base64');
+            const sivTag = Buffer.from(metadata.sivTag, 'base64');
+            const rawData = await decryptSivBinary(layer1Bytes, Buffer.from(mmk), sivIv, sivTag);
 
             // 6. Return as Object URL
             const blob = new Blob([rawData as any], { type: metadata.mimeType });

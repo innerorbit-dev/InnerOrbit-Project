@@ -1,6 +1,6 @@
 # 🛡️ InnerOrbit Comprehensive Knowledge Base
 
-This document serves as the definitive technical guide for the InnerOrbit messaging ecosystem. It is based on a structural and semantic analysis of the codebase (May 2026) and reconciles the "Doc-Code Gap."
+This document serves as the definitive technical guide for the InnerOrbit messaging ecosystem. It is based on a structural and semantic analysis of the codebase (May 2026) and reflects the completion of the Quantum-Safe Identity & Unified UX Hardening phase.
 
 ---
 
@@ -54,6 +54,8 @@ The shared logic used by both the Expo (Mobile) and Electron/Web (Desktop) apps.
 - `/lib/ratchet.ts`: Signal-based Double Ratchet logic with PQC extensions.
 - `/lib/firebase.js`: Production infrastructure for real-time signaling and auth.
 - `/lib/device-storage-service.ts`: Handles Secure Enclave (iOS) and Strongbox (Android) bindings.
+- `/lib/memory-hardening.ts`: **[NEW]** Utility for physically erasing sensitive data (Buffers) from RAM.
+- `/lib/firebase-polyfills.js`: **[HARDENED]** Central location for global shims, including WebAssembly and Crypto.
 
 ### 🧮 CalcX (Stealth Interface)
 
@@ -77,6 +79,7 @@ InnerOrbit implements a **Zero-Knowledge 3-Layer pipeline** for high-resolution 
 ### 🚀 Optimization
 
 - **Binary-First**: Processes `Uint8Array` directly via `fetch` and `ArrayBuffer` to avoid memory bloat.
+- **Size Limit**: Enforces a strict **100MB maximum** per file to optimize storage costs (Firebase Free Tier).
 - **Cross-Platform**: Uses standardized `Blob` and `URL` primitives for seamless Web/Native compatibility.
 - **On-Demand Decryption**: Media is decrypted in the `VaultMediaRenderer` only when viewed, preventing UI lag.
 
@@ -97,7 +100,43 @@ InnerOrbit implements a **Zero-Knowledge 3-Layer pipeline** for high-resolution 
 
 ---
 
-## 6. Known Technical Debt & Discrepancies
+## 6. Quantum-Safe Identity & Unified UX (Hardening Phase)
+
+### 👤 Memory-Hardened Identity (Zero-Leak Strategy)
+
+InnerOrbit employs a physical memory erasure strategy to ensure sensitive credentials never persist in the JS heap:
+
+- **Active Shredding**: Uses the `MemoryHardening` utility to convert PINs and User IDs into `Uint8Array` Buffers immediately upon capture.
+- **`secureWipe`**: Once an authentication attempt is complete, the app physically overwrites the memory buffers with zeros (`0x00`), preventing sensitive data from surviving in RAM.
+- **Entropy Hardening**: All service IDs (including Media Vault) use `randomBytes` from `@noble/curves` to prevent ID prediction attacks.
+- **Hardware Binding**: Identity keys are bound to platform-specific secure hardware (SecureStore/Keychain) for production use.
+- **Dev-Mode Bypass**: Implements `DEV_MODE_PLAIN_IDENTITY` in `identity-security-service.ts` to allow plain-text credential testing when `__DEV__` is active.
+
+### 🤖 Android Stabilization (Hermes Compatibility)
+
+To prevent runtime crashes on Android's Hermes engine:
+
+- **Lazy Loading**: `libsodium-wrappers` is lazily initialized with a console-silencing shim to prevent Hermes WASM crashes.
+- **WASM Polyfill**: `firebase-polyfills.js` provides a comprehensive `WebAssembly` global shim, enabling pure-JS fallbacks for cryptographic libraries.
+
+### 🎨 Premium Identity Aesthetics (Phase 10)
+
+The Calculator (CalcX) interface has been upgraded to a "Level 10" aesthetic baseline:
+
+- **Glassmorphism**: Display areas leverage `BlurView` for a high-end, frosted-glass aesthetic on mobile.
+- **Vibrant Identity**: Keypad gradients use saturated HSL palettes (Rose, Cyan, Slate) for a premium interaction feel.
+- **Stealth Feedback**: Real-time `StealthGlow` animations provide visual confirmation during secret code entry without exposing logic.
+
+### 🌀 Unified Loading Strategy
+
+InnerOrbit uses a **Hybrid Loading Strategy** to distinguish between security-critical operations and background data tasks:
+
+1. **Security-Critical (LoadingDots)**: Uses the premium **"Moving Bouncing Dots"** + **"Loading..." text** pattern for high-stakes transitions like App Preloading, Unlocking Workspace, and Identity Reveal.
+2. **Background Tasks (ActivityIndicator)**: Uses the standard **Spinner** for general data fetching (Chat List, Message History, Profile Sync) to maintain background efficiency.
+
+---
+
+## 7. Known Technical Debt & Discrepancies
 
 > [!IMPORTANT]
 > **Documentation Misalignment**
@@ -112,5 +151,6 @@ InnerOrbit implements a **Zero-Knowledge 3-Layer pipeline** for high-resolution 
 
 The full structural graph of the application is maintained in `graphify.json`.
 
-- **Total Nodes**: 1,422 (Updated for Phase 7)
-- **Total Edges**: 3,545
+- **Total Nodes**: 2,775 (Updated for Identity Hardening Phase)
+- **Total Edges**: 5,578
+- **Communities**: 208

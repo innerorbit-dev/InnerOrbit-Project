@@ -3,10 +3,14 @@ import React, { useEffect, useState, useRef, useMemo, useCallback } from "react"
 import { View, Text, FlatList, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, StyleSheet, Alert, Clipboard, Image, Modal, Keyboard, Animated } from "react-native";
 import { isWeb, select } from "../../utils/platform";
 import { useAuth } from "../../context/auth-context";
-import { subscribeToMessages, sendMessage, getUserProfile, deleteConversation, updateMessage, deleteMessageForEveryone, deleteMessageForMe, subscribeToUserPresence, markMessageAsRead, toggleMessageReaction, uploadChatImage, clearChatData, clearChatForMe, resetUnreadCount, updateConversationStealthMode, fetchV6PublicKeys } from "../../lib/firestore-service";
+import { subscribeToMessages, sendMessage, getUserProfile, deleteConversation, updateMessage, deleteMessageForEveryone, deleteMessageForMe, markMessageAsRead, toggleMessageReaction, uploadChatImage, clearChatData, clearChatForMe, resetUnreadCount, updateConversationStealthMode, fetchV6PublicKeys } from "../../lib/firestore-service";
+import { PresenceService } from "../../lib/presence-service";
+import { getConversationSharedSecret } from "../../lib/ratchet-key-service";
+import { useThemeStore } from "../../store/themeStore";
 import { getSuggestions } from "../../lib/suggestion-service";
 import { CustomImagePicker } from "../modals/CustomImagePicker";
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as DocumentPicker from 'expo-document-picker';
 import {
     encrypt,
     encryptV4,
@@ -27,6 +31,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { db } from "../../lib/firebase";
 import { StatusBar } from "expo-status-bar";
 import { useAppTheme } from "../../store/themeStore";
+import { LoadingDots } from "../ui/loading-dots";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import MessageBubble from "./message-bubble";
 import { Logger } from "../../lib/logger";
@@ -337,6 +342,9 @@ export function ChatInterface({
     const [selectedMessageIds, setSelectedMessageIds] = useState(new Set());
     
     const { startCall } = useCall();
+    const [isPartnerTyping, setIsPartnerTyping] = useState(false);
+    const [partnerProfileKey, setPartnerProfileKey] = useState(null);
+    const [sharedSecretStr, setSharedSecretStr] = useState(null);
 
 
     const confirmToggleCapture = async () => {
@@ -575,14 +583,54 @@ export function ChatInterface({
         }
     }, [conversationId, user?.uid]);
 
+    // Fetch Shared Secret and Partner Profile Key
+    useEffect(() => {
+        const initPresenceKeys = async () => {
+            if (!targetUid || !conversationId) return;
+            const secret = await getConversationSharedSecret(targetUid);
+            if (secret) {
+                const sHex = secret.toString("hex");
+                setSharedSecretStr(sHex);
+                const pKey = await PresenceService.getPartnerProfileKey(conversationId, targetUid, sHex);
+                if (pKey) setPartnerProfileKey(pKey);
+            }
+        };
+        initPresenceKeys();
+    }, [targetUid, conversationId]);
+
     // Subscribe to Other User's Presence
     useEffect(() => {
-        if (!targetUid) return;
-        const unsubscribe = subscribeToUserPresence(targetUid, (data) => {
-            setPresence(data);
+        if (!targetUid || !partnerProfileKey) return;
+        const unsubscribe = PresenceService.subscribeToPartnerPresence(targetUid, partnerProfileKey, (lastSeen) => {
+            setPresence(lastSeen ? { isOnline: true, lastSeen } : null);
         });
         return unsubscribe;
-    }, [targetUid]);
+    }, [targetUid, partnerProfileKey]);
+
+    // Subscribe to Partner's Typing Status
+    useEffect(() => {
+        if (!conversationId || !sharedSecretStr) return;
+        const unsubscribe = PresenceService.subscribeToTyping(conversationId, sharedSecretStr, (isTyping) => {
+            setIsPartnerTyping(isTyping);
+        });
+        return unsubscribe;
+    }, [conversationId, sharedSecretStr]);
+
+    // Update My Typing Status
+    useEffect(() => {
+        if (!conversationId || !sharedSecretStr) return;
+        const isTyping = messageText.length > 0;
+        PresenceService.setTypingStatus(conversationId, sharedSecretStr, isTyping).catch(() => {});
+        
+        // Auto-clear typing status after 5 seconds if no input
+        let timer;
+        if (isTyping) {
+            timer = setTimeout(() => {
+                PresenceService.setTypingStatus(conversationId, sharedSecretStr, false).catch(() => {});
+            }, 5000);
+        }
+        return () => clearTimeout(timer);
+    }, [messageText, conversationId, sharedSecretStr]);
 
 
     const scrollTimerRef = useRef(null);
@@ -650,7 +698,6 @@ export function ChatInterface({
                         }
 
                         if (!isEncrypted(msg.encryptedText)) {
-                            // Fallback for plain text messages (e.g. system messages or old versions)
                             return { ...msg, encryptedText: msg.encryptedText };
                         }
 
@@ -661,27 +708,40 @@ export function ChatInterface({
                             undefined, // pqcSecretKey
                             user?.uid,
                             targetUid,
-                            msg.id, // 🛡️ Persistent Vault ID
-                            isStealth // 🕵️ Stealth Mode (Skip Cache)
+                            msg.id,
+                            isStealth
                         );
 
-                        if (decrypted === "🔒 Message Hidden" || decrypted === "🔒 Failed" || decrypted === "🔒 Encrypted") {
-                            Logger.warn(`[ChatInterface] decrypt failed conv=${conversationId?.substring(0, 5)} version=${getMessageVersion(msg)} msg=${msg?.id?.substring(0, 5)}`);
+                        let text = decrypted;
+                        let recoveredSenderId = msg.senderId;
+
+                        if (decrypted && typeof decrypted === 'object' && decrypted.text) {
+                            text = decrypted.text;
+                            recoveredSenderId = decrypted.senderId;
                         }
-                        return { ...msg, encryptedText: decrypted };
+
+                        const finalMsg = { ...msg, encryptedText: text, senderId: recoveredSenderId || msg.senderId };
+
+                        // 🕶️ Mark as read ONLY if we are sure it's from the other person
+                        if (finalMsg.senderId && finalMsg.senderId !== user?.uid && finalMsg.status !== 'read') {
+                            markMessageAsRead(conversationId, finalMsg.id);
+                        }
+
+                        return finalMsg;
                     } catch (error) {
-                        // Show lock instead of scary error
                         return { ...msg, encryptedText: "🔒 Message Locked", isLocked: true };
                     }
                 }));
+
                 if (isMounted.current) {
                     setMessages(decryptedMessages);
+                    if (user?.uid && msgs.length > 0) {
+                        resetUnreadCount(conversationId, user.uid);
+                    }
 
-                    // Decrypt scheduled messages too for preview
                     const decryptedScheduled = await Promise.all(scheduled.map(async (msg) => {
                         try {
                             const decrypted = await decryptAsync(msg.encryptedText, encryptionKey, conversationId);
-                            // We don't show full text for scheduled usually, but keep logic consistent
                             return { ...msg, encryptedText: "🔒 Locked Message" };
                         } catch (e) {
                             return { ...msg, encryptedText: "🔒 Locked Message" };
@@ -692,21 +752,7 @@ export function ChatInterface({
             };
 
             processMessages();
-
             setLoading(false);
-
-            // Mark received messages as read and reset unread badge
-            msgs.forEach(msg => {
-                if (msg.senderId !== user?.uid && msg.status !== 'read') {
-                    markMessageAsRead(conversationId, msg.id);
-                }
-            });
-            // Always reset the conversation-level unread badge when the user has the chat open.
-            // This covers the case where messages were already marked 'read' but the counter
-            // wasn't zeroed (e.g. after a failed clear-chat, or first load).
-            if (user?.uid && msgs.length > 0) {
-                resetUnreadCount(conversationId, user.uid);
-            }
 
             // Short delay ensuring layout complete
             if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
@@ -752,37 +798,38 @@ export function ChatInterface({
 
             if (sendPolicy.version === "v6") {
                 try {
-                    encryptedText = await encryptV6(conversationId, messageText);
+                    // Sealed v6
+                    encryptedText = await encryptV6(conversationId, JSON.stringify({ s: user?.uid, m: messageText, t: Date.now() }));
                     encVersion = "v6";
                 } catch (v6Error) {
                     Logger.warn(`[ChatInterface] v6_send_failed fallback=v5.5 reason=${v6Error?.message}`);
-                    encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v5.5");
+                    encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v5.5", user?.uid);
                     encVersion = "v5.5";
                 }
             } else if (sendPolicy.version === "v5.5") {
-                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v5.5");
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v5.5", user?.uid);
                 encVersion = "v5.5";
             } else if (sendPolicy.version === "v5") {
-                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v5");
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v5", user?.uid);
                 encVersion = "v5";
             } else if (sendPolicy.version === "v4") {
                 try {
-                    encryptedText = await encryptV4(conversationId, messageText);
+                    // Sealed v4
+                    encryptedText = await encryptV4(conversationId, JSON.stringify({ s: user?.uid, m: messageText, t: Date.now() }));
                     encVersion = "v4";
                 } catch (v4Error) {
                     Logger.warn(`[ChatInterface] v4_send_failed conv=${conversationId?.substring(0, 5)} fallback=v3 reason=${v4Error?.message || "unknown"}`);
-                    encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v3");
+                    encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v3", user?.uid);
                     encVersion = "v3";
                 }
             } else if (sendPolicy.version === "v3") {
-                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v3");
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v3", user?.uid);
                 encVersion = "v3";
             } else if (sendPolicy.version === "v2") {
-                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v2");
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v2", user?.uid);
                 encVersion = "v2";
             } else {
-                // Absolute Minimum (Should not happen with new policy but keeping for safety)
-                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, "v2");
+                encryptedText = await encryptAsync(messageText, encryptionKey, undefined, conversationId, "v2", user?.uid);
                 encVersion = "v2";
             }
             
@@ -819,7 +866,88 @@ export function ChatInterface({
     };
 
     const handlePickImage = () => {
-        setIsPickerVisible(true);
+        Alert.alert(
+            "Secure Media Vault",
+            "Select the type of content to encrypt and send.",
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "📷 Image / Photo", 
+                    onPress: () => setIsPickerVisible(true) 
+                },
+                { 
+                    text: "📄 Document / Screenshot", 
+                    onPress: handlePickDocument 
+                }
+            ]
+        );
+    };
+
+    const handlePickDocument = async () => {
+        try {
+            const result = await DocumentPicker.getDocumentAsync({
+                type: [
+                    'application/pdf',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+                    'application/msword', // doc
+                    'text/plain',
+                    'image/*' // Screenshots are often picked as files too
+                ],
+                copyToCacheDirectory: true
+            });
+
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                handleSelectDocument(result.assets[0]);
+            }
+        } catch (err) {
+            Logger.error("Error picking document:", err);
+            Alert.alert("Error", "Failed to select document.");
+        }
+    };
+
+    const handleSelectDocument = async (asset) => {
+        try {
+            setSending(true);
+            Logger.log("[MediaVault] Processing document for vault upload:", asset.uri);
+
+            if (!targetUid) throw new Error("RECIPIENT_UNKNOWN");
+
+            const v6Keys = await fetchV6PublicKeys(targetUid);
+            if (!v6Keys || !v6Keys.pqc) {
+                Alert.alert("Security Restriction", "Recipient must have Quantum-Safe keys enabled to receive encrypted documents.");
+                setSending(false);
+                return;
+            }
+
+            const pqcPublicKey = Buffer.from(v6Keys.pqc, 'base64');
+            const vaultId = await MediaVaultService.uploadMedia(
+                asset.uri,
+                conversationId,
+                user?.uid,
+                pqcPublicKey,
+                asset.mimeType || 'application/octet-stream'
+            );
+
+            await sendMessage(conversationId, user?.uid, vaultId, replyingTo, scheduledDelay, 'vault_media', ephemeralDuration, {
+                encVersion: ENC_VERSION_VAULT_V1,
+                mimeType: asset.mimeType
+            });
+
+            setScheduledDelay(0);
+            setEphemeralDuration(0);
+            setReplyingTo(null);
+        } catch (error) {
+            Logger.error("Error processing/uploading document:", error);
+            if (error?.message?.includes("100MB")) {
+                Alert.alert("Size Limit", "Files must be smaller than 100MB to preserve storage quotas.");
+            } else if (error?.message?.includes("not allowed")) {
+                Alert.alert("Format Blocked", "This file type is not supported for security reasons.");
+            } else {
+                Alert.alert("Vault Error", "Secure document upload failed.");
+            }
+        } finally {
+            setSending(false);
+        }
     };
 
     const handleSelectImage = async (asset) => {
@@ -857,7 +985,8 @@ export function ChatInterface({
 
                 // 4. Send Message with Vault ID
                 await sendMessage(conversationId, user?.uid, vaultId, replyingTo, scheduledDelay, 'vault_media', ephemeralDuration, {
-                    encVersion: ENC_VERSION_VAULT_V1
+                    encVersion: ENC_VERSION_VAULT_V1,
+                    mimeType: 'image/jpeg'
                 });
             }
 
@@ -1116,6 +1245,7 @@ export function ChatInterface({
                                     <Text style={{
                                         fontSize: 12,
                                         color: (() => {
+                                            if (isPartnerTyping) return THEME.primary;
                                             const isOnline = presence?.isOnline;
                                             const lastSeen = presence?.lastSeen?.toMillis ? presence.lastSeen.toMillis() : (presence?.lastSeen || 0);
                                             const lastSeenValid = lastSeen && (Date.now() - lastSeen < 2 * 60 * 1000);
@@ -1123,6 +1253,7 @@ export function ChatInterface({
                                         })()
                                     }}>
                                         {(() => {
+                                            if (isPartnerTyping) return "Typing...";
                                             const isOnline = presence?.isOnline;
                                             const lastSeen = presence?.lastSeen?.toMillis ? presence.lastSeen.toMillis() : (presence?.lastSeen || 0);
                                             const lastSeenValid = lastSeen && (Date.now() - lastSeen < 2 * 60 * 1000); // 2 mins

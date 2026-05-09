@@ -19,7 +19,7 @@ try {
 } catch (e) { }
 
 export function useSecurity(settingsStealthExpanded) {
-  const [screenshotsBlocked, setScreenshotsBlocked] = useState(false);
+  const [screenshotsBlocked, setScreenshotsBlocked] = useState(true);
   const [biometricsEnabled, setBiometricsEnabled] = useState(false);
   const [biometricsSupported, setBiometricsSupported] = useState(false);
   const [hardwareLockEnabled, setHardwareLockEnabled] = useState(false);
@@ -33,6 +33,11 @@ export function useSecurity(settingsStealthExpanded) {
   useEffect(() => {
     (async () => {
       try {
+        const savedScreenshots = await AsyncStorage.getItem('screenshotsBlocked');
+        if (savedScreenshots !== null) {
+          setScreenshotsBlocked(savedScreenshots === 'true');
+        }
+
         const savedBio = await AsyncStorage.getItem('biometricsEnabled');
         if (savedBio === 'true') setBiometricsEnabled(true);
 

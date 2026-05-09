@@ -362,6 +362,46 @@ const Cursor = ({ THEME, fontSize, isSuperscript }) => {
   );
 };
 
+// Helper: Glowing Border Effect for Stealth Entry
+const StealthGlow = ({ active, THEME }) => {
+  const glowAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (active) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, { toValue: 1, duration: 1500, useNativeDriver: !isWeb }),
+          Animated.timing(glowAnim, { toValue: 0.3, duration: 1500, useNativeDriver: !isWeb }),
+        ])
+      ).start();
+    } else {
+      glowAnim.setValue(0);
+    }
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <Animated.View 
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        {
+          borderColor: THEME.primary,
+          borderWidth: 2,
+          borderRadius: 24,
+          opacity: glowAnim,
+          shadowColor: THEME.primary,
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.8,
+          shadowRadius: 15,
+          zIndex: 10
+        }
+      ]}
+    />
+  );
+};
+
 // ===== UI COMPONENTS =====
 
 const CalcButton = React.memo(({ label, type = "number", onPress, onLongPress, style, textStyle, THEME, isTablet, isDark }) => {
@@ -1650,7 +1690,22 @@ export default React.memo(function CalculatorComponent({ onSwitchMode, setIsHist
             </ScrollView>
           </View>
 
-          <View style={{ height: 120, justifyContent: 'center', paddingHorizontal: 24, marginBottom: 5 }}>
+          <View style={{ 
+            height: 120, 
+            justifyContent: 'center', 
+            paddingHorizontal: 24, 
+            marginBottom: 5,
+            overflow: 'hidden',
+            borderRadius: 24
+          }}>
+            {/* Glassmorphism Background */}
+            <BlurView
+              intensity={isDark ? 40 : 60}
+              tint={isDark ? 'dark' : 'light'}
+              style={StyleSheet.absoluteFill}
+            />
+            <StealthGlow active={display !== "0" && display.length > 0} THEME={THEME} />
+
             <ScrollView
               ref={displayScrollRef}
               horizontal

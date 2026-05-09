@@ -96,6 +96,31 @@
             }
         }
 
+        // 7. WebAssembly Polyfill (Fix for libsodium crash on Android/Hermes)
+        if (typeof global.WebAssembly === 'undefined') {
+            const Noop = function () { };
+            Noop.prototype = {};
+            global.WebAssembly = {
+                compile: () => Promise.reject(new Error("WebAssembly not supported")),
+                instantiate: () => Promise.reject(new Error("WebAssembly not supported")),
+                validate: () => false,
+                Module: Noop,
+                Instance: Noop,
+                Memory: Noop,
+                Table: Noop,
+                Global: Noop,
+                LinkError: Noop,
+                RuntimeError: Noop,
+                CompileError: Noop
+            };
+            global.WebAssembly.Module.prototype = {};
+            global.WebAssembly.Instance.prototype = {};
+            global.WebAssembly.Memory.prototype = {};
+            global.WebAssembly.Table.prototype = {};
+            global.WebAssembly.Global.prototype = {};
+        }
+
         if (__DEV__) console.log("[System] 🌍 Environment: Browser Compatibility Layer Loaded");
     }
 })();
+

@@ -21,7 +21,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "build:android": "python ../ops-scripts/build_apks.py",
+    "build:android": "python ../tools/ops/build_apks.py",
     "manage": "python ../manager.py"
   },
   "dependencies": {
@@ -29,13 +29,15 @@
     "electron-updater": "^6.7.3",
     "expo": "~54.0.33",
     "expo-background-task": "~1.0.10",
+    "expo-document-picker": "~14.0.8",
     "expo-task-manager": "^14.0.9",
     "libsodium-wrappers": "^0.7.16",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-native-nitro-modules": "^0.35.1",
     "react-native-quick-crypto": "^1.0.16",
-    "react-native-webrtc": "^124.0.7"
+    "react-native-webrtc": "^124.0.7",
+    "expo-screen-capture": "~8.0.9"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
@@ -81,7 +83,6 @@
     "expo-network": "~8.0.8",
     "expo-notifications": "^0.32.16",
     "expo-router": "~6.0.23",
-    "expo-screen-capture": "~8.0.9",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "~14.0.8",
     "expo-splash-screen": "^31.0.13",

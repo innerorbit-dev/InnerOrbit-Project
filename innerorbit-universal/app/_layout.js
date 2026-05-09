@@ -27,9 +27,10 @@ import InstallerWizard from '../components/setup/InstallerWizard';
 import DesktopTitleBar from '../components/ui/DesktopTitleBar';
 import { LOGO_BASE64 } from '../lib/logo-base64';
 import { WebRTCService } from "../lib/webrtc-service";
+import { LoadingDots } from '../components/ui/loading-dots';
 import { ActiveVoiceCall } from "../components/calling/ActiveVoiceCall";
 import { IncomingCallModal } from "../components/calling/IncomingCallModal";
-import * as ScreenCapture from 'expo-screen-capture';
+import { useAntiCapture } from '../lib/anti-capture-service';
 
 import { ErrorBoundary as CustomErrorBoundary } from '../components/error-boundary';
 export { CustomErrorBoundary as ErrorBoundary };
@@ -61,6 +62,7 @@ WebBrowser.maybeCompleteAuthSession();
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
+  useAntiCapture(); // 🛡️ Activate global protection life-cycle
   const { user, loading: authLoading, isLoggingOut, isDecoyMode, isUnlocking, welcomeData } = useAuth();
   const { theme, loading: themeLoading } = useAppTheme();
   const segments = useSegments();
@@ -158,11 +160,6 @@ function RootLayoutNav() {
     requestNotificationPermissions().catch(err => Logger.log('Perms denied:', err));
     if (!isWeb) {
       registerBackgroundUpdateTask().catch(err => Logger.error('Background task error:', err));
-      
-      // 🛡️ Global Anti-Screen Capture (React Level)
-      // Enforces FLAG_SECURE on Android and detection/blocking where supported on iOS.
-      ScreenCapture.preventScreenCaptureAsync()
-        .catch(err => Logger.warn('[Security] ScreenCapture block failed:', err));
     }
   }, []);
 
@@ -261,7 +258,7 @@ function RootLayoutNav() {
             resizeMode="contain"
           />
         </View>
-        <ActivityIndicator size="large" color={theme.primary} />
+        <LoadingDots color={theme.primary} size={10} gap={5} showText />
       </View>
     );
   }

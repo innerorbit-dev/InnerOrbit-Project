@@ -9,37 +9,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getHomeStyles } from "../../styles/home.styles";
 import { ConversationItem } from "./ConversationItem";
 
-// Bouncing Dots Component
-const BouncingDots = ({ color }) => {
-  const animations = React.useRef([...Array(3)].map(() => new Animated.Value(0))).current;
+import { LoadingDots } from "../ui/loading-dots";
 
-  React.useEffect(() => {
-    const loop = Animated.loop(
-      Animated.stagger(150, animations.map(anim =>
-        Animated.sequence([
-          Animated.timing(anim, { toValue: -6, duration: 300, useNativeDriver: !isWeb }),
-          Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: !isWeb })
-        ])
-      ))
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []);
-
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 4, height: 20 }}>
-      {animations.map((anim, index) => (
-        <Animated.View
-          key={index}
-          style={{
-            width: 4, height: 4, borderRadius: 2, backgroundColor: color, marginHorizontal: 2,
-            transform: [{ translateY: anim }]
-          }}
-        />
-      ))}
-    </View>
-  );
-};
+// BouncingDots is now replaced by the shared LoadingDots component
 
 export const ChatList = ({
   loading,
@@ -120,7 +92,7 @@ export const ChatList = ({
           Share your ID
         </Text>
         {myUserId === "Loading..." ? (
-          <BouncingDots color={THEME.primary} />
+          <LoadingDots color={THEME.primary} />
         ) : (
           <Text style={{ color: THEME.primary, fontWeight: 'bold', marginLeft: 6, fontSize: 13 }}>{myUserId}</Text>
         )}

@@ -48,12 +48,19 @@ jest.mock('../crypto-wrapper', () => ({
     ml_kem768: {
         encapsulate: jest.fn(() => ({ cipherText: new Uint8Array(10), sharedSecret: new Uint8Array(32) })),
         decapsulate: jest.fn(() => new Uint8Array(32))
-    }
+    },
+    randomBytes: jest.fn((len) => Buffer.alloc(len).fill(0))
 }));
 
 jest.mock('../encryption-core', () => ({
     encrypt: jest.fn(() => 'encrypted-data'),
     decrypt: jest.fn(() => Buffer.from(new Uint8Array(32).fill(0)).toString('base64')),
+    encryptSivBinary: jest.fn(() => Promise.resolve({ 
+        ciphertext: new Uint8Array(10), 
+        iv: new Uint8Array(12), 
+        tag: new Uint8Array(16) 
+    })),
+    decryptSivBinary: jest.fn(() => Promise.resolve(new Uint8Array(10))),
     ENC_VERSION_SIV: 'v3.5'
 }));
 
@@ -135,6 +142,32 @@ describe('MediaVaultService', () => {
             expect(addDoc).toHaveBeenCalled();
         });
 
+        test('throws error if file exceeds 100MB', async () => {
+            // Mock a large 101MB file
+            fetchSpy.mockImplementation(() =>
+                Promise.resolve({
+                    arrayBuffer: () => Promise.resolve(new ArrayBuffer(101 * 1024 * 1024))
+                } as any)
+            );
+
+            await expect(MediaVaultService.uploadMedia(
+                mockFileUri,
+                mockConversationId,
+                mockSenderId,
+                mockPqcPublicKey
+            )).rejects.toThrow('FILE_TOO_LARGE');
+        });
+
+        test('throws error for unsupported mime types (e.g. video)', async () => {
+            await expect(MediaVaultService.uploadMedia(
+                mockFileUri,
+                mockConversationId,
+                mockSenderId,
+                mockPqcPublicKey,
+                'video/mp4'
+            )).rejects.toThrow('UNSUPPORTED_FILE_TYPE');
+        });
+
         test('throws error if fetch fails', async () => {
             fetchSpy.mockRejectedValue(new Error('Fetch failed'));
 
@@ -151,9 +184,11 @@ describe('MediaVaultService', () => {
         const mockVaultId = 'vault-id-456';
         const mockMetadata = {
             conversationId: mockConversationId,
-            pqcCiphertext: 'pqc-ct',
-            aegisNonce: 'aegis-nonce',
-            sivIv: 'wrapped-mmk',
+            pqcCiphertext: Buffer.from(new Uint8Array(10)).toString('base64'),
+            wrappedMmk: 'wrapped-mmk-b64',
+            aegisNonce: Buffer.from(new Uint8Array(32)).toString('base64'),
+            sivIv: Buffer.from(new Uint8Array(12)).toString('base64'),
+            sivTag: Buffer.from(new Uint8Array(16)).toString('base64'),
             mimeType: 'image/jpeg'
         };
 

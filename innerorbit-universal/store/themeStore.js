@@ -8,8 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { useColorScheme } from 'react-native';
 import { isWeb } from '../utils/platform';
-import React, { useContext } from 'react';
-import { AuthContext } from '../context/auth-context';
+import React from 'react';
 
 // ----------------------------------------------------------------------------
 // 1. DECOY PALETTE (Calculator & Games)
@@ -189,6 +188,8 @@ export const useAppStore = create(
                 minimizeBlur: false
             },
             emergencyAutoActivation: false,
+            sharePresence: true,
+            isDecoyMode: true, // Managed by AuthProvider but stored here to break cycles
 
             // --- Stealth State ---
             stealthMode: 'header_lock', // 'header_lock', 'code', 'display_triple'
@@ -217,6 +218,8 @@ export const useAppStore = create(
                 autoSafetySettings: { ...state.autoSafetySettings, [key]: val }
             })),
             setEmergencyAutoActivation: (val) => set({ emergencyAutoActivation: val }),
+            setSharePresence: (val) => set({ sharePresence: val }),
+            setDecoyMode: (val) => set({ isDecoyMode: val }),
 
             // --- Stealth Actions ---
             setStealthMode: (mode) => set({ stealthMode: mode, lastStealthChange: Date.now() }),
@@ -249,6 +252,8 @@ export const useAppStore = create(
                 biometricsEnabled: state.biometricsEnabled,
                 appLockEnabled: state.appLockEnabled,
                 lastStealthChange: state.lastStealthChange,
+                sharePresence: state.sharePresence,
+                isDecoyMode: state.isDecoyMode,
             }),
         }
     )
@@ -270,16 +275,9 @@ export const useAppTheme = () => {
         chatBubbleThemeKey, 
         chatBgStyleKey, 
         setChatBubbleTheme, 
-        setChatBgStyle 
+        setChatBgStyle,
+        isDecoyMode
     } = useAppStore();
-
-    let isDecoyMode = true;
-    try {
-        const auth = useContext(AuthContext);
-        if (auth) {
-            isDecoyMode = auth.isDecoyMode;
-        }
-    } catch (e) { }
 
     const isDark = isDecoyMode
         ? getIsDark(decoyThemePreference, systemColorScheme)

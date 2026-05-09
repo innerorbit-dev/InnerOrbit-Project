@@ -16,7 +16,9 @@ export function usePrivacy(showSuccess) {
     setAutoSafetySettings,
     updateAutoSafetySetting,
     emergencyAutoActivation,
-    setEmergencyAutoActivation
+    setEmergencyAutoActivation,
+    sharePresence,
+    setSharePresence
   } = useAppStore();
 
   const handlePrivacyLevel = async (level) => {
@@ -41,6 +43,11 @@ export function usePrivacy(showSuccess) {
     setEmergencyAutoActivation(val);
   };
 
+  const handleToggleSharePresence = async (val) => {
+    setSharePresence(val);
+    if (showSuccess) showSuccess(val ? "Presence Sharing Enabled" : "Presence Sharing Disabled");
+  };
+
   return {
     privacyLevel,
     handlePrivacyLevel,
@@ -51,6 +58,8 @@ export function usePrivacy(showSuccess) {
     autoSafetySettings,
     handleUpdateAutoSafety,
     emergencyAutoActivation,
-    handleToggleEmergencyAuto
+    handleToggleEmergencyAuto,
+    sharePresence,
+    handleToggleSharePresence
   };
 }
