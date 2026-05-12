@@ -54,11 +54,18 @@ archive/
 # Operations scripts
 ops-scripts/
 
-# Project Specific
+# Project Documentation (ignore all .md except whitelisted)
 *.md
 !README.md
-!DAILY_DEV_GUIDE.txt
+!INNERORBIT_KNOWLEDGE_BASE.md
+!BeReady.md
 !innerorbit-universal/docs/*.md
+!tools/ops/README.md
+innerorbit-universal/docs/*.pdf
+
+# Resolved files (agent-generated)
+*.resolved
+!python_prompt_guide.md.resolved
 
 # Mobile Builds
 *.apk
@@ -84,23 +91,24 @@ java-17/
 __pycache__/
 *.pyc
 
-# Temporary
+# Temporary / Scratch
 dist_v2/
 innerorbit-universal/test_output.txt
 scratch/
+query_result.txt
+temporary-prompts-or-messages.txt
 
-# Project Documentation
-*.md
-!README.md
-!INNERORBIT_KNOWLEDGE_BASE.md
-!innerorbit-universal/docs/*.md
-innerorbit-universal/docs/*.pdf
+# Testing credentials (sensitive)
+Testing-Accounts
 
 # Tools
 tools/flask_manager/
 
+# Session state
 .terminal_choice
-.browser_choice 
+.browser_choice
+.last_launch
+
+# Graphify (auto-generated knowledge graph)
 graphify-out/
 graphify.json
-

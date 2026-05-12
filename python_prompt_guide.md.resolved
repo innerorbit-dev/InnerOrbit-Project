@@ -1,24 +1,36 @@
 # Python Environment Fix Prompt
 
-Copy and paste the text below into any new Antigravity/VS Code window if you see the "Select Interpreter" warning or if your terminal is not using the `.venv`.
+Copy and paste the text below into any new Antigravity/VS Code window if you
+see the "Select Interpreter" warning or if your terminal is not using the `.venv`.
 
 ---
 
 **Prompt to send to Antigravity:**
 
-> "I need to fix my Python environment in this workspace. Please apply these 'Nuclear Option' fixes to my [.vscode/settings.json](file:///c:/InnerOrbit-Mobile-Web-App/.vscode/settings.json) to ensure the terminal uses my `.venv` and stops showing warnings:
-> 
-> 1. Set `python.defaultInterpreterPath` to the absolute path of my project's [.venv\Scripts\python.exe](file:///c:/InnerOrbit-Mobile-Web-App/.venv/Scripts/python.exe) (use forward slashes `/`).
-> 2. Enable `python.terminal.activateEnvironment` and `python.terminal.activateEnvInCurrentTerminal`.
+> "I need to fix my Python environment in this workspace. Please apply these
+> 'Nuclear Option' fixes to my [.vscode/settings.json](file:///c:/InnerOrbit-Mobile-Web-App/.vscode/settings.json)
+> to ensure the terminal uses my `.venv` and stops showing warnings:
+>
+> 1. Set `python.defaultInterpreterPath` to the absolute path of my project's
+>    [.venv\Scripts\python.exe](file:///c:/InnerOrbit-Mobile-Web-App/.venv/Scripts/python.exe)
+>    (use forward slashes `/`).
+> 2. Enable `python.terminal.activateEnvironment` and
+>    `python.terminal.activateEnvInCurrentTerminal`.
 > 3. Disable `python.experiments.enabled`.
-> 4. Manually inject the `.venv\Scripts` directory into `terminal.integrated.env.windows.Path` so the terminal is forced to use the virtual environment even if auto-activation fails.
-> 5. Define a clean PowerShell profile in `terminal.integrated.profiles.windows` and set it as the default.
-> 
+> 4. Manually inject the `.venv\Scripts` directory into
+>    `terminal.integrated.env.windows.Path` so the terminal is forced to use the
+>    virtual environment even if auto-activation fails.
+> 5. Define a clean PowerShell profile in `terminal.integrated.profiles.windows`
+>    and set it as the default.
+>
 > Please check if I have a `.venv` first, and then apply these settings."
 
 ---
 
-### Why this prompt works:
+## Why this prompt works
+
 1. **Absolute Paths**: Stops VS Code from guessing where Python is.
-2. **Path Injection**: Forces the terminal to use your project's libraries even if the visual "decoration" `(.venv)` doesn't show up.
-3. **Clean Profile**: Prevents other extensions (like Java or PowerShell Pro) from breaking the Python setup.
+2. **Path Injection**: Forces the terminal to use your project's libraries even
+   if the visual "decoration" `(.venv)` doesn't show up.
+3. **Clean Profile**: Prevents other extensions (like Java or PowerShell Pro)
+   from breaking the Python setup.

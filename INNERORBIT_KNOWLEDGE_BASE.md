@@ -8,7 +8,7 @@ This document serves as the definitive technical guide for the InnerOrbit messag
 
 InnerOrbit is a multi-layered, privacy-first messaging platform designed for maximum resilience against both conventional and quantum-scale surveillance. It features a "Stealth UI" entry point and a cascading encryption engine.
 
-- **Primary Entry**: CalcX (Calculator Stealth Interface)
+- **Primary Entry**: CalcX (Calculator Stealth Interface only for mobiles)
 - **Core Engine**: `innerorbit-universal` (Cross-platform TS/JS)
 - **Primary Backend**: Firebase (Current Production)
 - **Secondary Distribution**: Oracle Server / Download Portal (Planned)
@@ -203,8 +203,71 @@ InnerOrbit uses a **Hybrid Loading Strategy** to distinguish between security-cr
 > **Documentation Misalignment**
 > Developers should ignore references to "Production Ready v6" in `.md` files. Always reference the `ENC_VERSION_*` constants in `encryption.ts` to see what is actually toggled on in the build.
 
-- **Double Ratchet Sync**: There is currently a "drift" in the v4 implementation between web and mobile platforms.
-- **SubtleCrypto Fallback**: Web browsers use SubtleCrypto for AES-GCM, but have a fallback to CryptoJS for legacy support.
+- **Double Ratchet Sync**: v4 and v6 implementations are fully interoperable between web and mobile using `createCipheriv` and `SubtleCrypto`.
+- **SubtleCrypto Baseline**: Web now uses `SubtleCrypto` (real AES-GCM) for all new messages. CryptoJS CTR fallback retained only for decrypting old messages (see §8.5).
+
+---
+
+## 8.5. Cross-Platform Decryption & CTR Recovery (May 2026)
+
+This section documents the root cause and resolution of cross-platform message decryption failures between Web and Android.
+
+### 🔍 The Problem
+
+Old Web messages encrypted with the CryptoJS shim produce `v3.5:<iv>:<zero_tag>:<data>`. The auth tag is `AAAAAAAAAAAAAAAAAAAAAA==` (16 zero bytes) because CryptoJS doesn't support AES-GCM — the Web shim mapped `createCipheriv("aes-256-gcm")` to AES-CTR and wrote a dummy tag. Android's `react-native-quick-crypto` (real GCM) correctly rejects the fake tag → returns `🔒 [Native Legacy Fail]`.
+
+### 🔧 CTR Recovery (`encryption.ts` ~line 533)
+
+The recovery block detects zero-tag messages and tries **3 keys × 4 IV strategies = 12 combinations**:
+
+| Keys (order) | IV Strategies (order) |
+| :--- | :--- |
+| 1. `SHA256(secretKey)` | 1. Raw 12-byte IV as-is ← **usually wins** |
+| 2. `Buffer.from(secretKey, 'hex')` | 2. 12-byte IV + `00000002` suffix |
+| 3. `Buffer.from(secretKey, 'utf8')` | 3. 12-byte IV + `00000001` suffix |
+| | 4. 12-byte IV + `00000000` suffix |
+
+**Winning combo**: `keyLen=32 ivLen=12` (SHA256-hashed key + raw 12-byte IV).
+
+### 🛡️ UI Guard Chain
+
+| Layer | File | Logic |
+| :--- | :--- | :--- |
+| **Chat list preview** | `useConversations.js:146` | Blanks any `lastMessage` starting with `🔒` |
+| **Chat list display** | `ConversationItem.js:112,241` | Shows `🔒 Message` if `lastMessageTime` exists but text is empty; `Start a secure conversation` for truly empty chats |
+| **Chat detail** | `chat-interface.js:740` | Unwraps sealed-sender JSON `{"s":...,"m":...}` from GCM recovery raw string path |
+
+### 📊 Firestore Data Model (Encrypted vs Plain)
+
+```text
+publicProfiles/<uid>
+ ├─ isOnline: boolean         ← PLAIN (always readable)
+ ├─ lastSeen: Timestamp       ← PLAIN (always readable)
+ └─ presenceBlob: "v3.5:..." ← ENCRYPTED (optional privacy overlay)
+
+conversations/<id>
+ ├─ lastMessageTime: Timestamp  ← PLAIN
+ ├─ lastMessage: "v3.5:..."     ← ENCRYPTED
+ └─ messages/<id>
+      ├─ timestamp: Timestamp   ← PLAIN
+      └─ encryptedText: "v3.5:..." ← ENCRYPTED
+```
+
+> **Key insight**: Timestamps are never encrypted. Only message text and presence blobs are encrypted. The raw `lastSeen` Firestore timestamp is the authoritative source for "last seen" UI display, with the encrypted blob as an optional high-privacy overlay.
+
+### 📱 Metro WebSocket Drop Fix
+
+Android Hermes pauses the JS thread when backgrounded → Metro WebSocket silently drops → logs stop. Fix in `auth-context.js:358`: a `console.log` on foreground resume re-pokes the connection before Logger calls.
+
+### ⚡ Quick Debug Checklist
+
+| Symptom | Root Cause | Check |
+| :--- | :--- | :--- |
+| `🔒 [Native Legacy Fail]` | CTR recovery failed | `keyLen`/`ivLen` in logs |
+| Grey lock + "Encrypted message" | Sealed-sender JSON unwrap missing | `startsWith('{"s":')` guard |
+| "Start a secure conversation" | `lastMessage` empty | Decryption blanked it or no messages |
+| "Unknown" last seen | Presence blob + raw timestamp both failed | `rawTsToIso` in presence-service.ts |
+| Logs stop after background | Metro WebSocket dropped | `📡 Metro reconnect ping` on resume |
 
 ---
 
@@ -224,8 +287,8 @@ A full git history scan was performed. **No actual secrets found** in any commit
 
 The full structural graph of the application is maintained in `graphify-out/graph.json`.
 
-- **Last built from commit**: `647d96ec` (graph is **stale** — 2 commits behind `4527353`)
-- **Total Nodes**: 2,775 + new session nodes (see `.graphify_semantic_manual.json`)
+- **Last updated**: May 2026 (Post cross-platform CTR recovery fix)
+- **Total Nodes**: 2,775+ (see `.graphify_semantic_manual.json`)
 - **Total Edges**: 5,578+
-- **Communities**: 208
+- **Communities**: 208+
 - **To refresh**: Run `graphify update .` from the repo root (no API cost)
