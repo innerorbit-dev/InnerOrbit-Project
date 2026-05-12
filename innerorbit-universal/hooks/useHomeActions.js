@@ -113,9 +113,12 @@ export function useHomeActions(ui, user, profile, privacyLevel, isDesktop, setSe
       // Get current user's public ID for the request
       const currentUserId = profile?.myUserId || "Unknown";
 
-      const result = await firestoreService.sendConnectionRequest(user.uid, targetUser.uid, {
-        userId: currentUserId,
-      });
+      const result = await firestoreService.sendConnectionRequest(
+        user.uid, 
+        targetUser.uid, 
+        { userId: currentUserId },
+        { userId: targetUser.userId }
+      );
 
       ui.setShowSearchModal(false);
       ui.setShowQRModal(false);

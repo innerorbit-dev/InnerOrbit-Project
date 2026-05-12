@@ -13,7 +13,11 @@ module.exports = {
         splash: {
             image: "./assets/splash.png",
             resizeMode: "contain",
-            backgroundColor: "#0F172A"
+            backgroundColor: "#F8FAFC",
+            dark: {
+                image: "./assets/splash.png",
+                backgroundColor: "#0F172A"
+            }
         },
         assetBundlePatterns: [
             "assets/icon.png",
@@ -71,7 +75,8 @@ module.exports = {
             "expo-secure-store",
             "expo-web-browser",
             "expo-background-task",
-            "expo-document-picker"
+            "expo-document-picker",
+            "expo-sqlite"
         ],
         notification: {
             icon: "./assets/icon.png",
@@ -81,12 +86,26 @@ module.exports = {
         },
         extra: {
             firebaseApiKey: process.env.FIREBASE_API_KEY,
+            firebaseApiKeyAndroid: process.env.FIREBASE_API_KEY_ANDROID,
+            firebaseApiKeyWeb: process.env.FIREBASE_API_KEY_WEB,
             firebaseAuthDomain: process.env.FIREBASE_AUTH_DOMAIN,
             firebaseProjectId: process.env.FIREBASE_PROJECT_ID,
             firebaseStorageBucket: process.env.FIREBASE_STORAGE_BUCKET,
             firebaseMessagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
             firebaseAppId: process.env.FIREBASE_APP_ID,
+            firebaseAppIdAndroid: process.env.FIREBASE_APP_ID_ANDROID,
+            firebaseAppIdWeb: process.env.FIREBASE_APP_ID_WEB,
+            firebaseAppIdIos: process.env.FIREBASE_APP_ID_IOS,
+            firebaseApiKeyIos: process.env.FIREBASE_API_KEY_IOS,
             firebaseMeasurementId: process.env.FIREBASE_MEASUREMENT_ID,
+            webRtcTurnServers: (() => {
+                try {
+                    const s = process.env.EXPO_PUBLIC_WEBRTC_TURN_SERVERS;
+                    return s ? JSON.parse(s) : [];
+                } catch {
+                    return [];
+                }
+            })(),
             eas: {
                 projectId: "235015b2-033f-4ae4-a1e1-0b62da6db12f"
             }

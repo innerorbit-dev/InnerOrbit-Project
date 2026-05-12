@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, ScrollView, Pressable, Switch, Image } from "react-native";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getHomeStyles } from "../../styles/home.styles";
+import { LoadingDots } from "../ui/loading-dots";
 import { UpdateManager } from "../../lib/update-manager";
 
 export const SettingsView = ({
@@ -79,7 +80,11 @@ export const SettingsView = ({
             <Image source={userPhoto ? { uri: userPhoto } : ACCOUNT_IMG} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: THEME.text, fontSize: 20, fontWeight: '700', marginBottom: 4 }}>{myUserId}</Text>
+            {['Loading...', 'Syncing...', 'Wait...'].includes(myUserId) ? (
+              <LoadingDots color={THEME.primary} size={5} gap={3} />
+            ) : (
+              <Text style={{ color: THEME.text, fontSize: 20, fontWeight: '700', marginBottom: 4 }}>{myUserId}</Text>
+            )}
             <Text numberOfLines={1} style={{ color: THEME.textSecondary, fontSize: 14 }}>{userBio || "No status bio set"}</Text>
           </View>
           <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: THEME.background, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: THEME.border }}>

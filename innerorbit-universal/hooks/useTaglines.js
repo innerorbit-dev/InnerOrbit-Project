@@ -18,7 +18,7 @@ export function useTaglines(isDesktop) {
 
     const interval = setInterval(() => {
       setCurrentTaglineIndex((prev) => (prev + 1) % taglines.length);
-    }, 60000); // 60000ms = 1 minute
+    }, 8000); // 8s — fast enough to feel dynamic, slow enough to read
 
     return () => clearInterval(interval);
   }, [isDesktop]);

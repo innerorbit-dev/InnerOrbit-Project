@@ -9,6 +9,7 @@ import re
 import argparse
 import subprocess
 from pathlib import Path
+import hashlib
 
 def read_json(p):
     with open(p, 'r', encoding='utf-8') as f:
@@ -66,23 +67,49 @@ def upload_text(service_account_path, bucket_name, dst, text):
         pass
     return make_public_url(bucket_name, dst)
 
-def update_firestore(service_account_path, version, download_url, release_notes):
+def get_sha256(file_path):
+    sha256_hash = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+    return sha256_hash.hexdigest()
+
+def update_firestore(service_account_path, version, download_url, release_notes, sha256=None):
     from google.cloud import firestore
     db = firestore.Client.from_service_account_json(service_account_path)
     doc_ref = db.collection('app').document('version')
-    payload = {'version': version, 'downloadUrl': download_url}
+    payload = {
+        'version': version, 
+        'downloadUrl': download_url,
+        'lastUpdated': firestore.SERVER_TIMESTAMP
+    }
     if release_notes:
         payload['releaseNotes'] = release_notes
+    if sha256:
+        payload['sha256'] = sha256
     doc_ref.set(payload)
 
 def main():
+    # Load environment variables from root .env if available
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--bump', choices=['patch', 'minor', 'major'], default='patch')
+    
     # Use relative path for service account or standard project root
     script_dir = Path(__file__).parent
     project_root = script_dir.parent.parent
-    parser.add_argument('--service-account', default=str(project_root / 'download-portal' / 'service-account.json'))
-    parser.add_argument('--bucket', default='innerorbit-bc8ce.appspot.com')
+    
+    # Default to the Portal project from .env or fallback to hardcoded
+    default_bucket = os.getenv('PORTAL_FIREBASE_STORAGE_BUCKET', 'innerorbit-portal.firebasestorage.app')
+    default_sa = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH', str(project_root / 'download-portal' / 'service-account.json'))
+
+    parser.add_argument('--service-account', default=default_sa)
+    parser.add_argument('--bucket', default=default_bucket)
     parser.add_argument('--release-notes', default='')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
@@ -133,9 +160,12 @@ def main():
 
     urls = upload_files(args.service_account, args.bucket, uploads)
     download_url = urls.get(f'updates/{installer_name}', '')
+    sha256 = get_sha256(str(installer_path))
+    
     if args.release_notes:
         rn_url = upload_text(args.service_account, args.bucket, 'updates/release-notes.json', json.dumps({"notes": args.release_notes}))
-    update_firestore(args.service_account, pkg.get('version'), download_url, args.release_notes)
+    
+    update_firestore(args.service_account, pkg.get('version'), download_url, args.release_notes, sha256)
     print('published_version=', pkg.get('version'))
     print('download_url=', download_url)
     print('latest_yml_url=', urls.get('updates/latest.yml', ''))

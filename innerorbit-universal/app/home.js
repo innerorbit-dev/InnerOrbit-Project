@@ -27,7 +27,7 @@ import { DesktopContent } from "../components/home/DesktopContent";
 import { BottomNav } from "../components/mobile/BottomNav";
 import { GoogleSecurityPrompt } from "../components/auth/GoogleSecurityPrompt";
 import { GlobalHeader } from "../components/ui/GlobalHeader";
-import { RequestsCenter } from "../components/home/RequestsCenter";
+import { NotificationCenter } from "../components/home/NotificationCenter";
 
 // Modals
 import { RenameContactModal } from "../components/modals/RenameContactModal";
@@ -57,7 +57,7 @@ import { useUpdates } from "../hooks/useUpdates";
 import { useTaglines } from "../hooks/useTaglines";
 import { usePrivacy } from "../hooks/usePrivacy";
 import { useHomeActions } from "../hooks/useHomeActions";
-import { useConnectionRequests } from "../hooks/useConnectionRequests";
+import { useConnectionNotifications } from "../hooks/useConnectionNotifications";
 import { usePasswordNudge } from "../hooks/usePasswordNudge";
 
 export default function ChatListScreen() {
@@ -127,10 +127,10 @@ export default function ChatListScreen() {
     setActiveTab(tabId);
   };
 
-  const showRequestsViewRef = React.useRef(ui?.showRequestsView);
+  const showNotificationsViewRef = React.useRef(ui?.showNotificationsView);
   React.useEffect(() => {
-    showRequestsViewRef.current = ui?.showRequestsView;
-  }, [ui?.showRequestsView]);
+    showNotificationsViewRef.current = ui?.showNotificationsView;
+  }, [ui?.showNotificationsView]);
 
   // Handle Initial Tab Sync (One-time, handles late params)
   React.useEffect(() => {
@@ -268,7 +268,7 @@ export default function ChatListScreen() {
     onMoveShouldSetPanResponderCapture: (_, g) =>
       !isDesktop && Math.abs(g.dx) > 30 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
     onPanResponderRelease: (_, g) => {
-      if (isDesktop || (activeSettingsSubPageRef.current ?? false) || (showRequestsViewRef.current ?? false)) return;
+      if (isDesktop || (activeSettingsSubPageRef.current ?? false) || (showNotificationsViewRef.current ?? false)) return;
 
       const TAB_ORDER = ['chats', 'stories', 'calls', 'settings'];
       const currentIdx = TAB_ORDER.indexOf(activeTabRef.current || 'chats');
@@ -284,7 +284,7 @@ export default function ChatListScreen() {
     }
   }), [isDesktop]); // Stable across renders, uses Refs for internal checks
 
-  const { requests, latestRequest, handleRespond, dismissRequest } = useConnectionRequests(user, isDecoyMode);
+  const { notifications, latestNotification, handleRespond, dismissNotification } = useConnectionNotifications(user, isDecoyMode);
 
   // Updates & Taglines
   const updates = useUpdates();
@@ -450,8 +450,8 @@ export default function ChatListScreen() {
         handleScanQRCode={handleScanQRCode}
         setShowSecurityModal={handleLockApp}
         handleLogout={handleLogout}
-        requestCount={requests.length}
-        onRequestsPress={() => ui.setShowRequestsView(true)}
+        notificationCount={notifications.length}
+        onNotificationsPress={() => ui.setShowNotificationsView(true)}
       />
 
       {/* Main Layout */}
@@ -606,10 +606,10 @@ export default function ChatListScreen() {
 
         )}
 
-        {/* Connection Requests Center (Mobile Overlay) */}
-        {!isDesktop && ui.showRequestsView && (
+        {/* Notification Center (Mobile Overlay) */}
+        {!isDesktop && ui.showNotificationsView && (
           <View
-            pointerEvents={ui.showRequestsView ? 'auto' : 'none'}
+            pointerEvents={ui.showNotificationsView ? 'auto' : 'none'}
             style={{
               position: 'absolute',
               top: Math.max(insets.top, 20) + 36,
@@ -619,10 +619,10 @@ export default function ChatListScreen() {
               zIndex: 1001
             }}
           >
-            <RequestsCenter
-              visible={ui.showRequestsView}
-              onClose={() => ui.setShowRequestsView(false)}
-              requests={requests}
+            <NotificationCenter
+              visible={ui.showNotificationsView}
+              onClose={() => ui.setShowNotificationsView(false)}
+              notifications={notifications}
               onRespond={handleRespond}
               THEME={THEME}
               isDesktop={false}
@@ -630,12 +630,12 @@ export default function ChatListScreen() {
           </View>
         )}
 
-        {/* Desktop Dropdown is rendered inside GlobalHeader or as sibling */}
-        {isDesktop && ui.showRequestsView && (
-          <RequestsCenter
-            visible={ui.showRequestsView}
-            onClose={() => ui.setShowRequestsView(false)}
-            requests={requests}
+        {/* Desktop Dropdown */}
+        {isDesktop && ui.showNotificationsView && (
+          <NotificationCenter
+            visible={ui.showNotificationsView}
+            onClose={() => ui.setShowNotificationsView(false)}
+            notifications={notifications}
             onRespond={handleRespond}
             THEME={THEME}
             isDesktop={true}
@@ -728,10 +728,10 @@ export default function ChatListScreen() {
       />
 
       <ConnectionRequestModal
-        visible={!!latestRequest}
-        request={latestRequest}
+        visible={!!latestNotification}
+        request={latestNotification}
         onRespond={handleRespond}
-        onClose={() => dismissRequest(latestRequest?.id)}
+        onClose={() => dismissNotification(latestNotification?.id)}
         THEME={THEME}
       />
 
@@ -803,7 +803,7 @@ export default function ChatListScreen() {
       )}
 
       {/* Mobile Bottom Navigation */}
-      {!isDesktop && !activeSettingsSubPage && !ui.showRequestsView && (
+      {!isDesktop && !activeSettingsSubPage && !ui.showNotificationsView && (
         <>
           {/* Mobile FAB - New Chat (Only on Chats tab AND when chats exist) */}
           {activeTab === 'chats' && conversations.length > 0 && (

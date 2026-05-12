@@ -38,7 +38,7 @@ export function useUI(isDesktop) {
   const [searchResult, setSearchResult] = useState(null);
   const [showScannedModal, setShowScannedModal] = useState(false);
   const [scannedUser, setScannedUser] = useState(null);
-  const [showRequestsView, setShowRequestsView] = useState(false);
+  const [showNotificationsView, setShowNotificationsView] = useState(false);
 
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -95,6 +95,6 @@ export function useUI(isDesktop) {
     searchResult, setSearchResult,
     showScannedModal, setShowScannedModal,
     scannedUser, setScannedUser,
-    showRequestsView, setShowRequestsView
+    showNotificationsView, setShowNotificationsView
   };
 }

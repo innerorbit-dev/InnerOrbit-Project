@@ -56,7 +56,8 @@ import { encryptWithDeviceKey, decryptWithDeviceKey } from './device-storage-ser
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 /** Wire format prefix for v6 messages. */
-export const ENC_VERSION_PQXDH = 'v6';
+import { ENC_VERSION_PQXDH } from './encryption-core';
+export { ENC_VERSION_PQXDH };
 
 /** AsyncStorage key prefix for v6 sessions (separate from v4 sessions). */
 const V6_SESSION_PREFIX = '@innerorbit_ratchet_v6_';
@@ -107,8 +108,8 @@ export async function getV6Session(conversationId: string): Promise<RatchetState
   if (data.includes(':') && !data.startsWith('{')) {
     try {
       data = await decryptWithDeviceKey(data);
-    } catch (e) {
-      Logger.error('[v6] Failed to decrypt v6 session — key mismatch or corruption:', e);
+    } catch (e: any) {
+      Logger.trace("ENCRYPTION", "encryption-v6.ts", "getV6Session", "FAILED", `Decryption error: ${e?.message}`);
       return null;
     }
   }
@@ -199,8 +200,9 @@ export async function saveV6Session(conversationId: string, state: RatchetState)
   try {
     const encrypted = await encryptWithDeviceKey(jsonData);
     await AsyncStorage.setItem(`${V6_SESSION_PREFIX}${conversationId}`, encrypted);
-  } catch (e) {
-    Logger.warn('[v6] Device key encryption failed, saving session as plaintext fallback');
+    Logger.trace("ENCRYPTION", "encryption-v6.ts", "saveV6Session", "SUCCESS");
+  } catch (e: any) {
+    Logger.trace("ENCRYPTION", "encryption-v6.ts", "saveV6Session", "RETRY", `Plaintext fallback: ${e?.message}`);
     await AsyncStorage.setItem(`${V6_SESSION_PREFIX}${conversationId}`, jsonData);
   }
 }
@@ -226,6 +228,8 @@ export async function initializeV6Session(
   ownDhPublicKey: Buffer;
   ownPqcPublicKey: Uint8Array;
 }> {
+  Logger.trace("ENCRYPTION", "encryption-v6.ts", "initializeV6Session", "PENDING", `conv=${conversationId?.substring(0, 5)}...`);
+
   // ── Auto-generate ML-KEM-768 key pair if not provided ──
   const ownPqcKeyPair = options.ownPqcKeyPair ?? ml_kem768.keygen();
 
@@ -243,7 +247,7 @@ export async function initializeV6Session(
   if (options.isAlice) {
     const { sharedSecret } = ml_kem768.encapsulate(options.remotePqcPublicKey);
     pqcSharedSecret = Buffer.from(sharedSecret);
-    Logger.log('[v6] Alice performed ML-KEM-768 encapsulation for initial PQC secret');
+    Logger.trace("ENCRYPTION", "encryption-v6.ts", "initializeV6Session", "SUCCESS", "Alice PQC encapsulation complete");
   }
 
   // ── Initialize the Double Ratchet state with mandatory PQC ──
@@ -260,11 +264,7 @@ export async function initializeV6Session(
   );
 
   await saveV6Session(conversationId, state);
-
-  Logger.log(
-    `[v6] ✅ Session initialized: conversationId=${conversationId}, isAlice=${options.isAlice}`
-  );
-
+  Logger.trace("ENCRYPTION", "encryption-v6.ts", "initializeV6Session", "SUCCESS", `isAlice=${options.isAlice}`);
   return {
     ownDhPublicKey: ownDhKeyPair.publicKey,
     ownPqcPublicKey: ownPqcKeyPair.publicKey,
@@ -286,6 +286,8 @@ export async function encryptV6(
   text: string,
   messageId?: string
 ): Promise<string> {
+  Logger.trace("ENCRYPTION", "encryption-v6.ts", "encryptV6", "PENDING", `conv=${conversationId?.substring(0, 5)}...`);
+
   const state = await getV6Session(conversationId);
   if (!state) {
     throw new Error('[v6] No session found. Call initializeV6Session() first.');
@@ -301,9 +303,9 @@ export async function encryptV6(
 
   const { ciphertext, header } = await ratchetEncrypt(state, text);
   await saveV6Session(conversationId, state);
+  Logger.trace("ENCRYPTION", "encryption-v6.ts", "encryptV6", "SUCCESS", `n=${header.n}`);
 
   const headerBase64 = Buffer.from(JSON.stringify(header)).toString('base64');
-  Logger.log(`[v6] 🔐 Encrypted message for conversation ${conversationId}, n=${header.n}`);
 
   // ── PERSIST FOR FUTURE SESSIONS ──
   if (messageId) {
@@ -328,6 +330,8 @@ export async function decryptV6(
   messageId?: string,
   skipCache: boolean = false
 ): Promise<string> {
+  Logger.trace("ENCRYPTION", "encryption-v6.ts", "decryptV6", "PENDING", `conv=${conversationId?.substring(0, 5)}...`);
+
   if (!ciphertextV6.startsWith(`${ENC_VERSION_PQXDH}:`)) {
     throw new Error(`[v6] Invalid prefix. Expected "v6:", got "${ciphertextV6.substring(0, 5)}"`);
   }
@@ -339,7 +343,7 @@ export async function decryptV6(
     const { MessageStorageService } = await import('./message-storage-service');
     const cached = await MessageStorageService.getMessage(conversationId, messageId);
     if (cached) {
-      Logger.log(`[v6] ✅ Cache hit for message ${messageId.substring(0, 5)}...`);
+      Logger.trace("ENCRYPTION", "encryption-v6.ts", "decryptV6", "SUCCESS", "Cache hit");
       return cached;
     }
   }
@@ -367,7 +371,7 @@ export async function decryptV6(
     await MessageStorageService.saveMessage(conversationId, messageId, plaintext);
   }
 
-  Logger.log(`[v6] ✅ Decrypted message for conversation ${conversationId}, n=${header.n}`);
+  Logger.trace("ENCRYPTION", "encryption-v6.ts", "decryptV6", "SUCCESS", `n=${header.n}`);
   return plaintext;
 }
 

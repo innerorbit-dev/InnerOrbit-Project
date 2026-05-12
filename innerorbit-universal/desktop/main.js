@@ -323,12 +323,12 @@ const pkg = require('../package.json');
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
 
-function fetchReleaseNotes() {
-    return new Promise((resolve) => {
-        try {
-            const base = pkg.build && pkg.build.extraMetadata && pkg.build.extraMetadata.firebaseUpdateUrl;
-            if (!base) return resolve('');
-            const url = `${base}release-notes.json?alt=media`;
+async function fetchReleaseNotes() {
+    try {
+        const base = pkg.build && pkg.build.extraMetadata && pkg.build.extraMetadata.firebaseUpdateUrl;
+        if (!base) return '';
+        const url = `${base}release-notes.json?alt=media`;
+        return new Promise((resolve) => {
             https.get(url, (res) => {
                 let data = '';
                 res.on('data', (chunk) => (data += chunk));
@@ -339,15 +339,18 @@ function fetchReleaseNotes() {
                     } catch { resolve(''); }
                 });
             }).on('error', () => resolve(''));
-        } catch { resolve(''); }
-    });
+        });
+    } catch { return ''; }
 }
 
 async function checkForUpdates() {
     try {
         const result = await autoUpdater.checkForUpdates();
         const info = result && result.updateInfo;
-        if (!info || !info.version) return;
+        if (!info || !info.version) {
+            if (mainWindow) mainWindow.webContents.send('update-not-available');
+            return;
+        }
 
         let notes = '';
         if (info.releaseNotes) {
@@ -359,27 +362,43 @@ async function checkForUpdates() {
         }
         if (!notes) notes = await fetchReleaseNotes();
 
-        const { response } = await dialog.showMessageBox({
-            type: 'info',
-            title: `Update Available (${info.version})`,
-            message: 'A new version is available.',
-            detail: notes || 'Bug fixes and improvements.',
-            buttons: ['Download & Install', 'Later'],
-            defaultId: 0,
-            cancelId: 1
-        });
-
-        if (response === 0) {
-            await autoUpdater.downloadUpdate();
+        // Instead of native dialog, send to renderer
+        if (mainWindow) {
+            mainWindow.webContents.send('update-available', {
+                version: info.version,
+                releaseNotes: notes
+            });
         }
     } catch (error) {
         Logger.error('Update check failed:', error);
+        if (mainWindow) mainWindow.webContents.send('update-error', error.message);
     }
 }
 
-autoUpdater.on('update-available', () => Logger.log('Update available.'));
+autoUpdater.on('download-progress', (progressObj) => {
+    if (mainWindow) {
+        mainWindow.webContents.send('update-download-progress', Math.floor(progressObj.percent));
+    }
+});
+
 autoUpdater.on('update-downloaded', () => {
     Logger.log('Update downloaded.');
+    if (mainWindow) {
+        mainWindow.webContents.send('update-downloaded');
+    }
+});
+
+ipcMain.handle('check-for-updates', async () => {
+    await checkForUpdates();
+    return { success: true };
+});
+
+ipcMain.handle('start-update-download', async () => {
+    await autoUpdater.downloadUpdate();
+    return { success: true };
+});
+
+ipcMain.handle('quit-and-install', () => {
     autoUpdater.quitAndInstall();
 });
 // ----------------------------

@@ -4,7 +4,7 @@ import { doc, setDoc, getDoc, collection, addDoc, serverTimestamp, Firestore } f
 
 const db = fb.db as unknown as Firestore;
 const storage = fb.storage as unknown as FirebaseStorage;
-import { encrypt, decrypt, ENC_VERSION_SIV, encryptSivBinary, decryptSivBinary } from "./encryption-core";
+import { encrypt, decrypt, ENC_VERSION_SIV, encryptSivBinary, decryptSivBinary } from "./encryption";
 import { encryptAegis256, decryptAegis256, generateAegisNonce } from "./aegis-wrapper";
 import { ml_kem768, randomBytes } from "./crypto-wrapper";
 import { Logger } from "./logger";

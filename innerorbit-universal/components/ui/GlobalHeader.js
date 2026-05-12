@@ -32,8 +32,8 @@ export const GlobalHeader = ({
     setShowSecurityModal,
     handleLogout,
     onLogoPress,
-    requestCount = 0,
-    onRequestsPress
+    notificationCount = 0,
+    onNotificationsPress
 }) => {
     const { theme: THEME } = useAppTheme();
     const insets = useSafeAreaInsets();
@@ -90,7 +90,7 @@ export const GlobalHeader = ({
                 {isDesktop ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Pressable
-                            onPress={() => onRequestsPress?.()}
+                            onPress={() => onNotificationsPress?.()}
                             style={({ pressed }) => ({
                                 flexDirection: 'row', alignItems: 'center',
                                 backgroundColor: pressed ? THEME.actionBackground : 'transparent',
@@ -98,9 +98,9 @@ export const GlobalHeader = ({
                                 marginRight: 8
                             })}
                         >
-                            <Feather name="bell" size={14} color={requestCount > 0 ? THEME.info : THEME.textSecondary} style={{ marginRight: 6 }} />
-                            <Text style={{ color: requestCount > 0 ? THEME.info : THEME.textSecondary, fontSize: 13, fontWeight: '600' }}>Requests</Text>
-                            {requestCount > 0 && (
+                            <Feather name="bell" size={14} color={notificationCount > 0 ? THEME.info : THEME.textSecondary} style={{ marginRight: 6 }} />
+                            <Text style={{ color: notificationCount > 0 ? THEME.info : THEME.textSecondary, fontSize: 13, fontWeight: '600' }}>Notification Center</Text>
+                            {notificationCount > 0 && (
                                 <View style={{
                                     marginLeft: 6,
                                     backgroundColor: THEME.error,
@@ -111,7 +111,7 @@ export const GlobalHeader = ({
                                     alignItems: 'center',
                                     paddingHorizontal: 4
                                 }}>
-                                    <Text style={{ color: THEME.surface, fontSize: 10, fontWeight: '900' }}>{requestCount}</Text>
+                                    <Text style={{ color: THEME.surface, fontSize: 10, fontWeight: '900' }}>{notificationCount}</Text>
                                 </View>
                             )}
                         </Pressable>
@@ -167,13 +167,13 @@ export const GlobalHeader = ({
                     </View>
                 ) : (
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        {/* Connection Requests Bell */}
+                        {/* Notification Center Bell */}
                         <Pressable
-                            onPress={() => onRequestsPress?.()}
+                            onPress={() => onNotificationsPress?.()}
                             style={({ pressed }) => ({ padding: 8, marginRight: 4, opacity: pressed ? 0.7 : 1, position: 'relative' })}
                         >
-                            <Feather name="bell" size={20} color={requestCount > 0 ? THEME.info : THEME.textSecondary} />
-                            {requestCount > 0 && (
+                            <Feather name="bell" size={20} color={notificationCount > 0 ? THEME.info : THEME.textSecondary} />
+                            {notificationCount > 0 && (
                                 <View style={{
                                     position: 'absolute',
                                     top: 2,
@@ -200,7 +200,7 @@ export const GlobalHeader = ({
                                             marginTop: -1
                                         }}
                                     >
-                                        {requestCount}
+                                        {notificationCount}
                                     </Text>
                                 </View>
                             )}

@@ -115,7 +115,7 @@ export const DesktopContent = ({
       ) : desktopDetailView === 'notifications' ? (
         <NotificationDetailView THEME={THEME} />
       ) : desktopDetailView === 'calls' ? (
-        <CallsDetailView THEME={THEME} />
+        <CallsDetailView THEME={THEME} isDesktop={true} />
       ) : desktopDetailView === 'stories' ? (
         <StoriesDetailView THEME={THEME} />
       ) : desktopDetailView === 'connect' ? (

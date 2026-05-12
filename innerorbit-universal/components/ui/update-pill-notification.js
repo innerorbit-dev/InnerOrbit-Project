@@ -26,6 +26,7 @@ export function UpdatePillNotification({ isDecoyMode }) {
     const [visible, setVisible] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
     const [progress, setProgress] = useState(0);
+    const [isDownloaded, setIsDownloaded] = useState(false);
 
     // Initial position depends on current device type
     // If mobile: starts at -200 (above screen)
@@ -62,9 +63,27 @@ export function UpdatePillNotification({ isDecoyMode }) {
         if (!manifest) return;
 
         try {
+            if (isWeb && window.electron) {
+                if (isDownloaded) {
+                    await window.electron.invoke('quit-and-install');
+                } else {
+                    setIsDownloading(true);
+                    await window.electron.invoke('start-update-download');
+                }
+                return;
+            }
+
             if (manifest.isApk) {
                 setIsDownloading(true);
+                setProgress(0);
                 const uri = await UpdateManager.downloadApk(manifest.url, (p) => setProgress(p));
+                
+                // Final verification before install
+                const isValid = await UpdateManager.verifyApk(uri, manifest.sha256);
+                if (!isValid) {
+                    throw new Error("APK Checksum Verification Failed. The file might be corrupted.");
+                }
+
                 await UpdateManager.installApk(uri);
             } else {
                 await UpdateManager.fetchUpdate();
@@ -77,8 +96,41 @@ export function UpdatePillNotification({ isDecoyMode }) {
             if (global.__triggerErrorBoundary) {
                 global.__triggerErrorBoundary(new Error(`Update System Error: ${e.message}`));
             }
+            alert(`Update Error: ${e.message}`);
+        } finally {
+            // For mobile non-APK (OTA), we reload anyway, so state doesn't matter
+            // For APK, if it reaches here it means it failed or intent was launched
+            if (manifest.isApk) setIsDownloading(false);
         }
     };
+
+    useEffect(() => {
+        // Desktop IPC Listeners
+        if (isWeb && window.electron) {
+            const unsubAvailable = window.electron.on('update-available', (info) => {
+                show({ ...info, isDesktop: true });
+            });
+            const unsubProgress = window.electron.on('update-download-progress', (p) => {
+                setProgress(p);
+            });
+            const unsubDownloaded = window.electron.on('update-downloaded', () => {
+                setIsDownloading(false);
+                setIsDownloaded(true);
+                setProgress(100);
+            });
+            const unsubError = window.electron.on('update-error', (err) => {
+                Logger.error("[UpdatePill] Desktop update error:", err);
+                setIsDownloading(false);
+            });
+
+            return () => {
+                unsubAvailable();
+                unsubProgress();
+                unsubDownloaded();
+                unsubError();
+            };
+        }
+    }, [isWeb, show]);
 
     useEffect(() => {
         const check = async () => {
@@ -141,7 +193,9 @@ export function UpdatePillNotification({ isDecoyMode }) {
                         <View style={styles.textColumn}>
                             <Text style={[styles.title, { color: THEME.text }]}>{updateTitle}</Text>
                             <Text style={[styles.subtitle, { color: THEME.textSecondary }]}>
-                                {isDownloading ? `Downloading... ${progress}%` : `Version ${manifest?.version || ''} is ready`}
+                                {isDownloaded ? "Update downloaded. Restart now?" : 
+                                 isDownloading ? `Downloading... ${progress}%` : 
+                                 `Version ${manifest?.version || ''} is ready`}
                             </Text>
                         </View>
                         <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
@@ -163,7 +217,7 @@ export function UpdatePillNotification({ isDecoyMode }) {
                             disabled={isDownloading}
                         >
                             <Text style={styles.installText}>
-                                {isDownloading ? 'Installing...' : 'Install Now'}
+                                {isDownloaded ? 'Restart & Install' : isDownloading ? 'Installing...' : 'Install Now'}
                             </Text>
                         </TouchableOpacity>
                     </View>

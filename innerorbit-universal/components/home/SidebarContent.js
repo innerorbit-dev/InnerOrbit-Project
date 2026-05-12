@@ -5,7 +5,8 @@ import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { getHomeStyles } from "../../styles/home.styles";
 import { APP_DOCS } from "../../lib/docs-data";
 import { ChatList } from "../mobile/ChatList";
-import { CallsView, StoriesView } from "../mobile/Placeholders";
+import { StoriesView } from "../mobile/Placeholders";
+import { CallsHistoryView } from "../calling/CallsHistoryView";
 import { ProfileDetailView, SecurityDetailView, PrivacyDetailView, NotificationDetailView, StealthDetailView, DocsDetailView, ConnectDetailView } from "./DetailViews";
 import { UpdateSettingsView } from "./UpdateSettingsView";
 import { ThemeSettingsView, AboutSettingsView } from "./DesktopSettingsViews";
@@ -432,7 +433,7 @@ export const SidebarContent = ({
             pointerEvents: activeTab === 'calls' ? 'auto' : 'none',
             backgroundColor: THEME.surface
           }}>
-            <CallsView THEME={THEME} isDesktop={isDesktop} />
+            <CallsHistoryView THEME={THEME} isDesktop={isDesktop} />
           </Animated.View>
 
           {/* Settings View layer */}

@@ -33,34 +33,47 @@ import { Logger } from "./logger";
 import { decryptLegacy } from "./legacy-decryption";
 
 import { initializeRatchet, ratchetEncrypt, ratchetDecrypt, RatchetState } from "./ratchet";
-import { decryptV6 } from "./encryption-v6";
+import { decryptV6, getV6Session, encryptV6 } from "./encryption-v6";
+export { decryptV6, getV6Session, encryptV6 };
 import { WebAuthnService } from "./webauthn-service";
 import { getSecureItem, setSecureItem, removeSecureItem, getDeviceKeys, encryptWithDeviceKey, decryptWithDeviceKey } from "./device-storage-service";
+export { encryptWithDeviceKey, decryptWithDeviceKey };
 export { enableWebHardwareLock } from "./device-storage-service";
-import { 
-  encrypt, 
-  decrypt, 
-  ENC_VERSION_ELITE, 
-  ENC_VERSION_GCM, 
-  ENC_VERSION_SIV, 
-  ENC_VERSION_RATCHET, 
-  ENC_VERSION_QUANTUM, 
-  ENC_VERSION_QUANTUM_CHACHA, 
-  ENC_VERSION_PQXDH, 
-  GCM_IV_LENGTH 
+import {
+  encrypt,
+  decrypt,
+  ENC_VERSION_ELITE,
+  ENC_VERSION_GCM,
+  ENC_VERSION_SIV,
+  ENC_VERSION_RATCHET,
+  ENC_VERSION_QUANTUM,
+  ENC_VERSION_QUANTUM_CHACHA,
+  ENC_VERSION_PQXDH,
+  GCM_IV_LENGTH,
+  EncryptionCapabilities,
+  DEFAULT_ENCRYPTION_CAPABILITIES,
+  encryptSivBinary,
+  decryptSivBinary
 } from "./encryption-core";
 
-export { 
-  encrypt, 
-  decrypt, 
-  ENC_VERSION_ELITE, 
-  ENC_VERSION_GCM, 
-  ENC_VERSION_SIV, 
-  ENC_VERSION_RATCHET, 
-  ENC_VERSION_QUANTUM, 
-  ENC_VERSION_QUANTUM_CHACHA, 
-  ENC_VERSION_PQXDH, 
-  GCM_IV_LENGTH 
+export {
+  EncryptionCapabilities,
+  DEFAULT_ENCRYPTION_CAPABILITIES
+};
+
+export {
+  encrypt,
+  decrypt,
+  ENC_VERSION_ELITE,
+  ENC_VERSION_GCM,
+  ENC_VERSION_SIV,
+  ENC_VERSION_RATCHET,
+  ENC_VERSION_QUANTUM,
+  ENC_VERSION_QUANTUM_CHACHA,
+  ENC_VERSION_PQXDH,
+  GCM_IV_LENGTH,
+  encryptSivBinary,
+  decryptSivBinary
 };
 
 /**
@@ -81,7 +94,7 @@ const PQC_PRIVATE_KEY_STORAGE = "innerorbit_pqc_private_key";
  * 🛠️ GLOBAL SERVICE KILL-SWITCH
  * Set this to 'true' to immediately disable all outgoing chat services and trigger the UI fallback alert.
  */
-export const GLOBAL_DISABLE_CHAT_SERVICES = false; 
+export const GLOBAL_DISABLE_CHAT_SERVICES = false;
 
 /**
  * Generates or retrieves Post-Quantum Keypair (Kyber768)
@@ -104,12 +117,13 @@ export async function getPQCKeypair(): Promise<{ publicKey: Uint8Array; secretKe
     await setSecureItem(PQC_PUBLIC_KEY_STORAGE, Buffer.from(pk.publicKey).toString("base64"));
     await setSecureItem(PQC_PRIVATE_KEY_STORAGE, Buffer.from(pk.secretKey).toString("base64"));
 
+    Logger.trace("ENCRYPTION", "encryption.ts", "getPQCKeypair", "SUCCESS");
     return {
       publicKey: pk.publicKey,
       secretKey: pk.secretKey
     };
-  } catch (error) {
-    console.error("Error managing PQC keys:", error);
+  } catch (error: any) {
+    Logger.trace("ENCRYPTION", "encryption.ts", "getPQCKeypair", "FAILED", error?.message || "Unknown error");
     throw new Error("Failed to initialize Post-Quantum keys");
   }
 }
@@ -127,7 +141,7 @@ export async function getPQCKeypair(): Promise<{ publicKey: Uint8Array; secretKe
  */
 export function generateSafetyNumber(myKeys: any, theirKeys: any): string {
   // Sort IDs/Keys to ensure stability regardless of who calls the function
-  const keys = [myKeys, theirKeys].sort((a, b) => 
+  const keys = [myKeys, theirKeys].sort((a, b) =>
     (a.identity || "").localeCompare(b.identity || "")
   );
 
@@ -148,16 +162,6 @@ export function generateSafetyNumber(myKeys: any, theirKeys: any): string {
 
 export const LEGACY_SEND_VERSION = "legacy";
 
-export interface EncryptionCapabilities {
-  v3_5: boolean; // AES-GCM-SIV (Hardened Baseline)
-  v4: boolean;   // Double Ratchet
-  v5: boolean;   // Quantum Resistant (ML-KEM + AES-GCM)
-  v5_5: boolean; // Quantum Resistant (ML-KEM + ChaCha20)
-  v6: boolean;   // PQXDH (Architectural Hold)
-  minReadable: number;
-  maxWritable: number;
-}
-
 export interface SendVersionResolutionInput {
   localCapabilities?: Partial<EncryptionCapabilities> | null;
   remoteCapabilities?: Partial<EncryptionCapabilities> | null;
@@ -170,15 +174,6 @@ export interface SendVersionResolution {
   reason: string;
 }
 
-export const DEFAULT_ENCRYPTION_CAPABILITIES: EncryptionCapabilities = {
-  v3_5: true,  // Stable Baseline: AES-GCM-SIV
-  v4: false,   // Architectural Hold: v4 Double Ratchet
-  v5: true,    // Stable: v5 Quantum Resistant Hybrid
-  v5_5: true,  // Stable: v5.5 Quantum Resistant (ChaCha20)
-  v6: false,   // Architectural Hold: v6 PQXDH
-  minReadable: 1,
-  maxWritable: 5.5 
-};
 
 const telemetry: {
   sendVersion: { v2: number; v3: number; "v3.5": number; v4: number; v5: number; "v5.5": number; v6: number; legacy: number };
@@ -279,19 +274,92 @@ export async function encryptAsync(
   const sealedPayload = senderId ? JSON.stringify({ s: senderId, m: text, t: Date.now() }) : text;
 
   // ── PQXDH Double Ratchet (v6) ──
-  if ((versionOverride === ENC_VERSION_PQXDH || versionOverride === ENC_VERSION_RATCHET) && conversationId) {
-    const { encryptV6 } = await import("./encryption-v6");
+  if (versionOverride === ENC_VERSION_PQXDH && conversationId) {
     return await encryptV6(conversationId, sealedPayload);
   }
 
   // ── Double Ratchet (v4) ──
   if (versionOverride === ENC_VERSION_RATCHET && conversationId) {
-    // Note: We'll need to make sure ratchetEncrypt handles the sealed payload
-    const { ratchetEncrypt } = await import("./ratchet");
-    // This part might need further refinement depending on how ratchetEncrypt is called
+    return await encryptV4(conversationId, sealedPayload);
   }
 
-  // ── High-Assurance Fallback ──
+  // ── Web: Use async AEAD paths to produce real auth tags ──
+  // The sync encrypt() uses a CryptoJS CTR shim on web which generates a dummy
+  // zero-filled auth tag. This breaks mobile native GCM/Poly1305 verification.
+  // We use SubtleCrypto (AES-GCM) or libsodium (ChaCha20-Poly1305) instead.
+  if (isWeb) {
+    const iv = randomBytes(GCM_IV_LENGTH);
+    const keyHashed = createHash("sha256").update(secretKey).digest();
+
+    // ── Web v5.5: ML-KEM + ChaCha20-Poly1305 via libsodium ──
+    if (pqcPublicKey && (versionOverride === ENC_VERSION_QUANTUM_CHACHA)) {
+      try {
+        const { cipherText: pqcCt, sharedSecret } = ml_kem768.encapsulate(pqcPublicKey);
+        const hybridKey = createHash("sha256")
+          .update(Buffer.concat([keyHashed, Buffer.from(sharedSecret)]))
+          .digest();
+        const sodium = await import('libsodium-wrappers');
+        await sodium.ready;
+        const encoded = new TextEncoder().encode(sealedPayload);
+        // Returns ciphertext + 16-byte Poly1305 tag concatenated
+        const combined = sodium.crypto_aead_chacha20poly1305_ietf_encrypt(
+          encoded, null, null, new Uint8Array(iv), new Uint8Array(hybridKey)
+        );
+        const payload = Buffer.from(combined.slice(0, -16)).toString('base64');
+        const tag = Buffer.from(combined.slice(-16)).toString('base64');
+        Logger.log("[encryptAsync] ✅ web v5.5 ChaCha20-Poly1305 (libsodium)");
+        return `${ENC_VERSION_QUANTUM_CHACHA}:${iv.toString('base64')}:${tag}:${Buffer.from(pqcCt).toString('base64')}:${payload}`;
+      } catch (e) {
+        Logger.warn("[encryptAsync] v5.5 libsodium failed, falling back to v5", e);
+        // fall through to v5 path below
+      }
+    }
+
+    // ── Web v5 / v3.5 / v3: ML-KEM + AES-256-GCM via SubtleCrypto ──
+    if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+      try {
+        if (pqcPublicKey && (versionOverride === ENC_VERSION_QUANTUM || versionOverride === ENC_VERSION_QUANTUM_CHACHA)) {
+          // v5: ML-KEM + AES-GCM
+          const { cipherText: pqcCt, sharedSecret } = ml_kem768.encapsulate(pqcPublicKey);
+          const hybridKey = createHash("sha256")
+            .update(Buffer.concat([keyHashed, Buffer.from(sharedSecret)]))
+            .digest();
+          const cryptoKey = await globalThis.crypto.subtle.importKey(
+            'raw', new Uint8Array(hybridKey), { name: 'AES-GCM' }, false, ['encrypt']
+          );
+          const encoded = new TextEncoder().encode(sealedPayload);
+          const encrypted = await globalThis.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(iv), tagLength: 128 }, cryptoKey, encoded
+          );
+          const result = new Uint8Array(encrypted);
+          const payload = Buffer.from(result.slice(0, -16)).toString('base64');
+          const tag = Buffer.from(result.slice(-16)).toString('base64');
+          Logger.log("[encryptAsync] ✅ web v5 AES-256-GCM (SubtleCrypto)");
+          return `${ENC_VERSION_QUANTUM}:${iv.toString('base64')}:${tag}:${Buffer.from(pqcCt).toString('base64')}:${payload}`;
+        } else {
+          // v3.5 SIV-style: derive deterministic IV, use SubtleCrypto AES-GCM
+          const ivSiv = createHmac('sha256', keyHashed).update(sealedPayload).digest().slice(0, GCM_IV_LENGTH);
+          const cryptoKey = await globalThis.crypto.subtle.importKey(
+            'raw', new Uint8Array(keyHashed), { name: 'AES-GCM' }, false, ['encrypt']
+          );
+          const encoded = new TextEncoder().encode(sealedPayload);
+          const encrypted = await globalThis.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(ivSiv), tagLength: 128 }, cryptoKey, encoded
+          );
+          const result = new Uint8Array(encrypted);
+          const payload = Buffer.from(result.slice(0, -16)).toString('base64');
+          const tag = Buffer.from(result.slice(-16)).toString('base64');
+          Logger.log("[encryptAsync] ✅ web v3.5 AES-256-GCM-SIV (SubtleCrypto)");
+          return `${ENC_VERSION_SIV}:${Buffer.from(ivSiv).toString('base64')}:${tag}:${payload}`;
+        }
+      } catch (subtleErr) {
+        Logger.warn("[encryptAsync] SubtleCrypto failed, falling back to sync", subtleErr);
+      }
+    }
+  }
+
+  // ── Mobile / SubtleCrypto unavailable: use native sync path ──
+  // react-native-quick-crypto provides real AES-GCM on mobile, so this is safe.
   return encrypt(sealedPayload, secretKey, pqcPublicKey, versionOverride);
 }
 
@@ -316,18 +384,17 @@ export async function decryptAsync(
       const isV6 = ciphertext.startsWith("v6:");
       if (!conversationId) throw new Error(`Conversation ID required for ${isV6 ? 'v6' : 'v4'} decryption`);
 
-      const { getV6Session } = await import("./encryption-v6");
       const state = isV6 ? await getV6Session(conversationId) : await getRatchetSession(conversationId);
-      
+
       if (!state && myUid && partnerUid) {
         const { initializeRatchetIfNeeded, initializeV6IfNeeded } = await import("./ratchet-key-service");
-        isV6 
+        isV6
           ? await initializeV6IfNeeded(conversationId, myUid, partnerUid)
           : await initializeRatchetIfNeeded(conversationId, myUid, partnerUid);
       }
 
-      rawDecrypted = isV6 
-        ? await decryptV6(conversationId, ciphertext, messageId, skipCache) 
+      rawDecrypted = isV6
+        ? await decryptV6(conversationId, ciphertext, messageId, skipCache)
         : await decryptV4(conversationId, ciphertext, messageId, skipCache);
     } else if (ciphertext.startsWith(`${ENC_VERSION_QUANTUM}:`) || ciphertext.startsWith(`${ENC_VERSION_QUANTUM_CHACHA}:`)) {
       let activePqcKey = pqcSecretKey;
@@ -336,14 +403,33 @@ export async function decryptAsync(
         activePqcKey = keys.secretKey;
       }
       rawDecrypted = decrypt(ciphertext, secretKey, activePqcKey);
+
+      // 🛡️ Web Quantum Recovery: sync createDecipheriv uses CTR on web which
+      // cannot decrypt AES-GCM (v5) or ChaCha20-Poly1305 (v5.5) ciphertexts.
+      // Attempt proper async decryption using SubtleCrypto / libsodium.
+      if (rawDecrypted.startsWith("🔒") || rawDecrypted === "") {
+        const quantumResult = await attemptAsyncQuantumRecovery(ciphertext, secretKey, activePqcKey);
+        if (quantumResult) {
+          rawDecrypted = quantumResult;
+        }
+      }
     } else {
-      rawDecrypted = decrypt(ciphertext, secretKey, pqcSecretKey);
+      // Wrap in try/catch so a thrown error still allows GCM recovery below.
+      try {
+        rawDecrypted = decrypt(ciphertext, secretKey, pqcSecretKey);
+      } catch (syncErr: any) {
+        Logger.warn(`[decryptAsync] sync decrypt threw: ${syncErr?.message ?? syncErr}`);
+        rawDecrypted = "🔒 [sync-throw]";
+      }
     }
 
-    // 🛡️ Post-Decryption Sync Recovery (v3 fallback)
-    if (rawDecrypted === "🔒 Encrypted" && (ciphertext.startsWith("v3:") || ciphertext.startsWith("v2:"))) {
-        // ... (Strategy A logic preserved below)
-        rawDecrypted = await attemptAsyncGcmRecovery(ciphertext, secretKey) || "🔒 Encrypted";
+    // 🛡️ GCM Recovery: always attempt async GCM for v3.5/v3/v2 payloads,
+    // even if sync decrypt returned a failure string or threw.
+    if (ciphertext.startsWith("v3.5:") || ciphertext.startsWith("v3:") || ciphertext.startsWith("v2:")) {
+      const gcmResult = await attemptAsyncGcmRecovery(ciphertext, secretKey);
+      if (gcmResult) {
+        rawDecrypted = gcmResult;
+      }
     }
 
     // 🕶️ UNSEAL: Recover metadata if present
@@ -359,36 +445,233 @@ export async function decryptAsync(
     }
 
     return rawDecrypted;
-  } catch (error) {
-    Logger.error("Async decryption error:", error);
-    return "🔒 Failed";
+  } catch (error: any) {
+    // Tag the error with the ciphertext version for easier debugging.
+    const version = ciphertext?.split(':')?.[0] ?? 'unknown';
+    Logger.warn(`[decryptAsync] ⚠️ Decryption failed | version=${version} | reason=${error?.message ?? error}`);
+    // Re-throw so the caller (chat-interface) catch block can handle UI locking correctly.
+    // Do NOT return a failure string — that would render as message content in the bubble.
+    throw error;
   }
 }
 
 /** 🛡️ Strategy A: Web Crypto API (SubtleCrypto) GCM helper */
 async function attemptAsyncGcmRecovery(ciphertext: string, secretKey: string): Promise<string | null> {
-    const parts = ciphertext.split(":");
-    if (parts.length >= 4 && isWeb && typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
-        try {
-            const iv = Buffer.from(parts[1], "base64");
-            const tag = Buffer.from(parts[2], "base64");
-            const dataBase64 = parts[3];
-            const keyHashed = createHash('sha256').update(secretKey).digest();
-            const cryptoKey = await globalThis.crypto.subtle.importKey(
-                'raw', new Uint8Array(keyHashed), { name: 'AES-GCM' }, false, ['decrypt']
-            );
-            const ciphertextBuf = Buffer.from(dataBase64, 'base64');
-            const tagBuf = Buffer.from(tag);
-            const combined = new Uint8Array(ciphertextBuf.length + tagBuf.length);
-            combined.set(ciphertextBuf);
-            combined.set(tagBuf, ciphertextBuf.length);
-            const decryptedRaw = await globalThis.crypto.subtle.decrypt(
-                { name: 'AES-GCM', iv: new Uint8Array(iv) }, cryptoKey, combined
-            );
-            return new TextDecoder().decode(decryptedRaw);
-        } catch (e) {}
-    }
+  const parts = ciphertext.split(":");
+  Logger.log(`[decrypt] 🔧 GCM recovery entry: parts=${parts.length}, isWeb=${isWeb}, prefix=${parts[0]}, keyLen=${secretKey?.length ?? 'null'}`);
+  if (parts.length < 4) {
+    Logger.warn(`[decrypt] ⚠️ GCM recovery aborted: parts.length=${parts.length} < 4`);
     return null;
+  }
+
+  // 🛡️ Web: SubtleCrypto AES-GCM (runs on Web platform, browser native)
+  if (isWeb && typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+    try {
+      const iv = Buffer.from(parts[1], "base64");
+      const tag = Buffer.from(parts[2], "base64");
+      const dataBase64 = parts[3];
+      const keyHashed = createHash('sha256').update(secretKey).digest();
+      const cryptoKey = await globalThis.crypto.subtle.importKey(
+        'raw', new Uint8Array(keyHashed), { name: 'AES-GCM' }, false, ['decrypt']
+      );
+      const ciphertextBuf = Buffer.from(dataBase64, 'base64');
+      const tagBuf = Buffer.from(tag);
+      const combined = new Uint8Array(ciphertextBuf.length + tagBuf.length);
+      combined.set(ciphertextBuf);
+      combined.set(tagBuf, ciphertextBuf.length);
+      const decryptedRaw = await globalThis.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(iv) }, cryptoKey, combined
+      );
+      Logger.log("[decrypt] ✅ v3.5 web async GCM recovery (SubtleCrypto)");
+      return new TextDecoder().decode(decryptedRaw);
+    } catch (e) { /* fall through to CTR recovery */ }
+  }
+
+  // 🛡️ Mobile: Native AES-GCM recovery for Web SubtleCrypto messages.
+  // Web's encryptAsync uses SubtleCrypto which produces standard AES-256-GCM ciphertext.
+  // Mobile's sync decrypt() throws on auth failure; we retry here with explicit error capture.
+  if (!isWeb) {
+    try {
+      const iv = Buffer.from(parts[1], "base64");
+      const tag = Buffer.from(parts[2], "base64");
+      const dataBase64 = parts[3];
+      const keyHashed = createHash('sha256').update(secretKey).digest();
+
+      // Attempt A: hashed key (SHA-256 of hex string) — uses statically imported createDecipheriv
+      try {
+        const decipher = createDecipheriv("aes-256-gcm", keyHashed as any, iv as any);
+        (decipher as any).setAuthTag(tag as any);
+        let decrypted = (decipher as any).update(dataBase64, "base64", "utf8");
+        decrypted += (decipher as any).final("utf8");
+        if (decrypted) {
+          Logger.log("[decrypt] ✅ v3.5 mobile async GCM recovery (hashed key)");
+          return decrypted.replace(/\0/g, '').trim();
+        }
+      } catch (e1: any) {
+        Logger.warn(`[decrypt] ⚠️ Mobile GCM attemptA failed: ${e1?.message ?? e1}`);
+      }
+
+      // Attempt B: raw hex-decoded key (secretKey treated as 32-byte hex)
+      if (secretKey.length === 64) {
+        try {
+          const rawKey = Buffer.from(secretKey, 'hex');
+          const decipher = createDecipheriv("aes-256-gcm", rawKey as any, iv as any);
+          (decipher as any).setAuthTag(tag as any);
+          let decrypted = (decipher as any).update(dataBase64, "base64", "utf8");
+          decrypted += (decipher as any).final("utf8");
+          if (decrypted) {
+            Logger.log("[decrypt] ✅ v3.5 mobile async GCM recovery (raw hex key)");
+            return decrypted.replace(/\0/g, '').trim();
+          }
+        } catch (e2: any) {
+          Logger.warn(`[decrypt] ⚠️ Mobile GCM attemptB failed: ${e2?.message ?? e2}`);
+        }
+      }
+    } catch (e: any) { Logger.warn(`[decrypt] ⚠️ Mobile GCM outer-catch: ${e?.message ?? e}`); }
+  }
+
+  // 🛡️ Mobile + Web fallback: CTR recovery for old Web-CTR messages with zero-filled tags.
+  // The Web CryptoJS shim calls createCipheriv("aes-256-gcm", keyHashed, 12byteIv) which
+  // internally maps to CryptoJS AES-CTR. CryptoJS may word-align the 12-byte IV to a 12-byte
+  // WordArray (no counter word), so we try: raw 12-byte IV + 3 suffixed 16-byte IVs.
+  try {
+    const iv = Buffer.from(parts[1], "base64");
+    const dataBase64 = parts[3];
+    const keyHashed = createHash('sha256').update(secretKey).digest();
+    // Raw 32-byte key (hex decoded) — Web CryptoJS shim key before SHA-256 hashing.
+    const rawHexKey = secretKey.length === 64 ? Buffer.from(secretKey, 'hex') : null;
+    const keysToTry = rawHexKey
+      ? [keyHashed, rawHexKey, Buffer.from(secretKey, 'utf8')]
+      : [keyHashed, Buffer.from(secretKey, 'utf8')];
+    // IV strategies: raw 12-byte WordArray first, then 16-byte with NIST CTR suffixes
+    const ivStrategies: Buffer[] = [
+      iv, // 12-byte as-is — CryptoJS word-aligns without counter extension
+      ...(iv.length === 12
+        ? ["00000002", "00000001", "00000000"].map(s => Buffer.from(iv.toString('hex') + s, 'hex'))
+        : []),
+    ];
+    Logger.log(`[decrypt] 🔧 CTR recovery: ${keysToTry.length} keys × ${ivStrategies.length} IVs`);
+    const CryptoJS = (await import('crypto-js')).default;
+    for (const key of keysToTry) {
+      const hexKey = CryptoJS.enc.Hex.parse(Buffer.from(key).toString('hex'));
+      for (const ivBuf of ivStrategies) {
+        try {
+          const hexIv = CryptoJS.enc.Hex.parse(ivBuf.toString('hex'));
+          const bytes = CryptoJS.AES.decrypt(dataBase64, hexKey, {
+            iv: hexIv, mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding
+          });
+          const res = bytes.toString(CryptoJS.enc.Utf8)?.replace(/\0/g, '').trim();
+          if (res && res.length > 0 && !/[\x01-\x08\x0E-\x1F]/.test(res)) {
+            Logger.log(`[decrypt] ✅ v3.5 CTR recovery! keyLen=${key.length} ivLen=${ivBuf.length}`);
+            return res;
+          }
+        } catch (e: any) {
+          Logger.warn(`[decrypt] ⚠️ CTR attempt failed: ${e?.message}`);
+        }
+      }
+    }
+    Logger.warn(`[decrypt] ❌ CTR recovery exhausted all ${keysToTry.length * ivStrategies.length} combos`);
+  } catch (e: any) {
+    Logger.warn(`[decrypt] ❌ CTR outer error: ${e?.message}`);
+  }
+
+  return null;
+}
+
+/**
+ * 🛡️ Strategy B: Async Quantum Hybrid Recovery (v5 / v5.5) for Web
+ *
+ * PURPOSE:
+ * On web, the sync createDecipheriv shim uses CryptoJS AES-CTR which cannot
+ * decrypt AES-GCM (v5) or ChaCha20-Poly1305 (v5.5) ciphertexts produced by
+ * the mobile native crypto stack. This function provides proper async
+ * decryption using browser-native APIs:
+ *   - v5  (ML-KEM + AES-GCM):           SubtleCrypto
+ *   - v5.5 (ML-KEM + ChaCha20-Poly1305): libsodium-wrappers
+ *
+ * BACKWARD COMPATIBILITY:
+ * This function is ADDITIVE — it only runs on web when the sync path fails.
+ * All existing messages (v1 through v6) remain decryptable via their
+ * original paths. No ciphertext formats are modified.
+ */
+async function attemptAsyncQuantumRecovery(
+  ciphertext: string,
+  secretKey: string,
+  pqcSecretKey: Uint8Array
+): Promise<string | null> {
+  // 🛡️ Runs on ALL platforms — Web uses SubtleCrypto/libsodium; Mobile uses this as
+  // a recovery path when native GCM rejects a Web-CTR message with a zero-filled tag.
+
+  try {
+    const parts = ciphertext.split(":");
+    if (parts.length < 5) return null;
+
+    const version = parts[0];
+    const iv = Buffer.from(parts[1], "base64");
+    const tag = Buffer.from(parts[2], "base64");
+    const pqcCt = Buffer.from(parts[3], "base64");
+    const payload = parts[4];
+
+    // 1. ML-KEM-768 Decapsulation (platform-agnostic via @noble)
+    const sharedSecret = ml_kem768.decapsulate(pqcCt, pqcSecretKey);
+
+    // 2. Derive hybrid key: SHA-256(hashedSecretKey || pqcSharedSecret)
+    const keyHashed = createHash("sha256").update(secretKey).digest();
+    const hybridKey = createHash("sha256")
+      .update(Buffer.concat([keyHashed, Buffer.from(sharedSecret)]))
+      .digest();
+
+    // 3. Decrypt based on version
+    if (version === ENC_VERSION_QUANTUM && typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+      // v5: AES-256-GCM via SubtleCrypto
+      const cryptoKey = await globalThis.crypto.subtle.importKey(
+        'raw', new Uint8Array(hybridKey), { name: 'AES-GCM' }, false, ['decrypt']
+      );
+      const ciphertextBuf = Buffer.from(payload, 'base64');
+      const tagBuf = Buffer.from(tag);
+      const combined = new Uint8Array(ciphertextBuf.length + tagBuf.length);
+      combined.set(ciphertextBuf);
+      combined.set(tagBuf, ciphertextBuf.length);
+
+      const decryptedRaw = await globalThis.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(iv) }, cryptoKey, combined
+      );
+      Logger.log("[decrypt] ✅ v5 web async GCM recovery succeeded");
+      return new TextDecoder().decode(decryptedRaw);
+    }
+
+    if (version === ENC_VERSION_QUANTUM_CHACHA) {
+      // v5.5: ChaCha20-Poly1305 via libsodium-wrappers
+      try {
+        const sodium = await import('libsodium-wrappers');
+        await sodium.ready;
+
+        const ciphertextBuf = Buffer.from(payload, 'base64');
+        // libsodium expects ciphertext + tag concatenated
+        const combined = new Uint8Array(ciphertextBuf.length + tag.length);
+        combined.set(ciphertextBuf);
+        combined.set(tag, ciphertextBuf.length);
+
+        const decryptedBuf = sodium.crypto_aead_chacha20poly1305_ietf_decrypt(
+          null,               // nsec (unused)
+          combined,           // ciphertext + tag
+          null,               // additional data (none)
+          new Uint8Array(iv), // nonce (12 bytes)
+          new Uint8Array(hybridKey) // key (32 bytes)
+        );
+        Logger.log("[decrypt] ✅ v5.5 web async ChaCha20 recovery succeeded");
+        return new TextDecoder().decode(decryptedBuf);
+      } catch (sodiumErr) {
+        Logger.warn("[decrypt] ⚠️ v5.5 libsodium recovery failed:", sodiumErr);
+        return null;
+      }
+    }
+
+    return null;
+  } catch (e) {
+    Logger.warn("[decrypt] ⚠️ Async quantum recovery failed:", e);
+    return null;
+  }
 }
 
 /**
@@ -399,23 +682,27 @@ export function generateRandomKey(): string {
 }
 
 export function isEncrypted(text: string): boolean {
-  if (!text) return false;
+  if (!text || typeof text !== 'string') return false;
   const isV5 = text.startsWith(`${ENC_VERSION_RATCHET}:`) || text.includes("\"dh\":");
   const result = text.startsWith(`${ENC_VERSION_PQXDH}:`) ||
     text.startsWith(`${ENC_VERSION_QUANTUM}:`) ||
+    text.startsWith(`${ENC_VERSION_QUANTUM_CHACHA}:`) ||
+    text.startsWith(`${ENC_VERSION_SIV}:`) ||
     text.startsWith(`${ENC_VERSION_ELITE}:`) ||
     text.startsWith(`${ENC_VERSION_GCM}:`) ||
     text.startsWith("U2FsdGVkX1") ||
     isV5;
   if (result) {
-    let version = text.substring(0, 3);
-    if (version === "v3:") version = "v3 (Elite)";
-    else if (version === "v4:") version = "v4 (Ratchet)";
-    else if (version === "v5:") version = "v5 (Quantum)";
-    else if (version === "v6:") version = "v6 (PQXDH)";
+    let version = text.substring(0, 4);
+    if (text.startsWith("v3.5:")) version = "v3.5 (SIV)";
+    else if (text.startsWith("v5.5:")) version = "v5.5 (Quantum-ChaCha)";
+    else if (text.startsWith("v3:")) version = "v3 (Elite)";
+    else if (text.startsWith("v4:")) version = "v4 (Ratchet)";
+    else if (text.startsWith("v5:")) version = "v5 (Quantum)";
+    else if (text.startsWith("v6:")) version = "v6 (PQXDH)";
     else if (text.startsWith("U2FsdGVkX1")) version = "Legacy (CBC)";
-    
-    Logger.log(`[isEncrypted] detected: ${version}${isV5 ? ' (v5-legacy)' : ''}`);
+
+    Logger.trace("ENCRYPTION", "encryption.ts", "isEncrypted", "SUCCESS", `version=${version}`);
   }
   return result;
 }
@@ -453,9 +740,9 @@ export async function setUserPassphrase(passphrase: string): Promise<void> {
     // Store salt and hash together
     const storageValue = `${salt}:${hashedPassphrase}`;
     await setSecureItem(USER_PASSPHRASE_STORAGE, storageValue);
-    Logger.log("[Encryption] User passphrase updated with strong hashing");
-  } catch (error) {
-    console.error("Error setting user passphrase:", error);
+    Logger.trace("ENCRYPTION", "encryption.ts", "setUserPassphrase", "SUCCESS");
+  } catch (error: any) {
+    Logger.trace("ENCRYPTION", "encryption.ts", "setUserPassphrase", "FAILED", error?.message || "Unknown error");
     throw error;
   }
 }
@@ -518,8 +805,8 @@ export async function getRatchetSession(conversationId: string): Promise<Ratchet
   if (data.includes(":") && !data.startsWith("{")) {
     try {
       data = await decryptWithDeviceKey(data);
-    } catch (e) {
-      Logger.error("[Encryption] Failed to decrypt ratchet session:", e);
+    } catch (e: any) {
+      Logger.trace("ENCRYPTION", "encryption.ts", "getRatchetSession", "FAILED", `Decryption error: ${e?.message}`);
       return null;
     }
   }
@@ -564,8 +851,9 @@ export async function saveRatchetSession(conversationId: string, state: RatchetS
   try {
     const encryptedData = await encryptWithDeviceKey(jsonData);
     await AsyncStorage.setItem(`${RATCHET_SESSION_PREFIX}${conversationId}`, encryptedData);
-  } catch (e) {
-    Logger.warn("[Encryption] Failed to encrypt ratchet session, saving in plaintext fallback");
+    Logger.trace("ENCRYPTION", "encryption.ts", "saveRatchetSession", "SUCCESS");
+  } catch (e: any) {
+    Logger.trace("ENCRYPTION", "encryption.ts", "saveRatchetSession", "RETRY", `Plaintext fallback: ${e?.message}`);
     await AsyncStorage.setItem(`${RATCHET_SESSION_PREFIX}${conversationId}`, jsonData);
   }
 }
@@ -585,7 +873,7 @@ export async function encryptV4(conversationId: string, text: string): Promise<s
 }
 
 export async function decryptV4(
-  conversationId: string, 
+  conversationId: string,
   ciphertextV4: string,
   messageId?: string,
   skipCache: boolean = false

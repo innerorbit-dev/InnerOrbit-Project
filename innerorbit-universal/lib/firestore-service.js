@@ -30,12 +30,15 @@ import { IdentitySecurityService } from "./identity-security-service";
 
 // Collection names
 const USERS_COLLECTION = "users";
+const PUBLIC_PROFILES_COLLECTION = "publicProfiles";
 const CONVERSATIONS_COLLECTION = "conversations";
 const MESSAGES_SUBCOLLECTION = "messages";
 const DEFAULT_ENCRYPTION_CAPABILITIES = {
   v5: true,
+  v5_5: true,
+  v6: true,
   minReadable: 1,
-  maxWritable: 5,
+  maxWritable: 6,
 };
 
 /**
@@ -44,7 +47,9 @@ const DEFAULT_ENCRYPTION_CAPABILITIES = {
  * @returns Object containing the generated userId and pin
  */
 export async function createUserProfile(user) {
+  Logger.trace('FIRESTORE', 'firestore-service.js', 'createUserProfile', 'PENDING', `uid=${user?.uid?.substring(0, 5)}...`);
   try {
+
     const userRef = doc(db, USERS_COLLECTION, user.uid);
 
     // 1. Check if profile exists BEFORE we do any work
@@ -54,6 +59,7 @@ export async function createUserProfile(user) {
       if (data.userId && data.pin) {
         if (!data.encryptionCapabilities) {
           await setDoc(userRef, { encryptionCapabilities: DEFAULT_ENCRYPTION_CAPABILITIES }, { merge: true });
+          Logger.trace('FIRESTORE', 'firestore-service.js', 'createUserProfile', 'SUCCESS', 'Backfilled encryption capabilities');
         }
 
         // 🔐 DECRYPT CLOUD IDENTITY (v5.5 -> v3 Fallback handled by service)
@@ -61,7 +67,7 @@ export async function createUserProfile(user) {
         const decryptedPin = IdentitySecurityService.decryptFromCloud(data.pin, user.uid);
 
         const sanitizedUid = user.uid ? `${user.uid.substring(0, 5)}...` : 'unknown';
-        Logger.log(`[Firestore] Profile already exists for ${sanitizedUid}. ID: ${decryptedUserId}`);
+        Logger.trace('FIRESTORE', 'firestore-service.js', 'createUserProfile', 'SUCCESS', `Profile recovered: ${decryptedUserId}`);
 
         // Calculate isReturningUser: true if lastSeen is older than 7 days
         let isReturningUser = false;
@@ -79,9 +85,39 @@ export async function createUserProfile(user) {
           }
         }
 
+        // 🔐 Ensure public profile exists for existing users (Lazy Population)
+        const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, user.uid);
+        const publicSnap = await getDoc(publicRef);
+        if (!publicSnap.exists()) {
+          Logger.log(`[Firestore] 🛠️ Populating missing public profile for ${sanitizedUid}`);
+          await setDoc(publicRef, {
+            uid: user.uid,
+            userId: decryptedUserId,
+            displayName: user.displayName || data.displayName || null,
+            photoURL: user.photoURL || data.photoURL || null,
+            photoVisibility: data.photoVisibility || 'private',
+            dhPublicKey: data.dhPublicKey || null,
+            v6PublicKeys: data.v6PublicKeys || null,
+            bio: data.bio || null,
+            createdAt: data.createdAt || serverTimestamp(),
+            lastSeen: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          // 🔐 Repair: If public profile exists but userId is missing
+          const publicData = publicSnap.data();
+          if (!publicData.userId) {
+            Logger.log(`[Firestore] 🛠️ Repairing userId in public profile for ${sanitizedUid}`);
+            await setDoc(publicRef, {
+              userId: decryptedUserId,
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
+        }
+
         return {
-          userId: resolvedUserId,
-          pin: resolvedPin || resolvedUserId,
+          userId: decryptedUserId,
+          pin: decryptedPin || decryptedUserId,
           isNewUser: false,
           isReturningUser,
           hasSetPassword: data.hasSetPassword || false
@@ -145,6 +181,7 @@ export async function createUserProfile(user) {
       const cloudSyncEnabled = await IdentitySecurityService.isCloudSyncEnabled();
       const encryptedPin = cloudSyncEnabled ? IdentitySecurityService.encryptForCloud(pin, user.uid) : "LOCAL_ONLY";
 
+      // 1. Write to Private Collection
       transaction.set(userRef, {
         uid: user.uid,
         email: user.email,
@@ -157,12 +194,23 @@ export async function createUserProfile(user) {
         lastSeen: serverTimestamp(),
       }, { merge: true });
 
+      // 2. Write to Public Collection
+      const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, user.uid);
+      transaction.set(publicRef, {
+        uid: user.uid,
+        userId,
+        displayName: user.displayName || null,
+        photoURL: user.photoURL || null,
+        createdAt: serverTimestamp(),
+        lastSeen: serverTimestamp(),
+      }, { merge: true });
+
       const sanitizedUid = user.uid ? `${user.uid.substring(0, 5)}...` : 'unknown';
-      Logger.log(`[Firestore] ✅ Created NEW profile for ${sanitizedUid}: ${userId} (pin encrypted v5.5)`);
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'createUserProfile', 'SUCCESS', `Created NEW profile: ${userId}`);
       return { userId, pin, isNewUser: true, hasSetPassword: false };
     });
   } catch (error) {
-    Logger.error("Error creating user profile:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'createUserProfile', 'FAILED', error.message);
     throw error;
   }
 }
@@ -188,6 +236,7 @@ async function migrateIdentityEncryptionIfNeeded(userRef, data, uid) {
   try {
     // Already fully migrated — no work needed.
     if (data.profileEncryptionVersion === "v5.5") {
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'migrateIdentityEncryption', 'SUCCESS', 'Already migrated to v5.5');
       return { migratedUserId: null, migratedPin: null };
     }
 
@@ -250,29 +299,97 @@ async function migrateIdentityEncryptionIfNeeded(userRef, data, uid) {
  * @returns User profile or null if not found
  */
 export async function getUserProfile(uid) {
-  if (!uid) return null;
+  Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserProfile', 'PENDING', `uid=${uid?.substring(0, 5)}...`);
+  if (!uid) {
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserProfile', 'FAILED', 'Missing uid');
+    return null;
+  }
+
+
+  // 1. Attempt Private Profile (Sensitive data, restricted to contacts)
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
     const userSnap = await getDoc(userRef);
+
     if (userSnap.exists()) {
       const data = userSnap.data();
-      // 🔐 DECRYPT CLOUD IDENTITY (v5.5 -> v3 Fallback)
+      // 🔐 DECRYPT CLOUD IDENTITY (v5.5 -> v3 Fallback handled by service)
       if (data.userId) data.userId = IdentitySecurityService.decryptFromCloud(data.userId, uid);
       if (data.pin) data.pin = IdentitySecurityService.decryptFromCloud(data.pin, uid);
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserProfile', 'SUCCESS', `Private profile resolved: ${uid.substring(0, 5)}...`);
       return data;
     }
-    return null;
-  } catch (error) {
-    // CRITICAL diagnostics for Motorola connectivity issues
-    const networkStatus = typeof navigator !== 'undefined' && navigator.onLine ? "ONLINE" : "OFFLINE (Browser/Navigator)";
-    Logger.error(`[Firestore Error] Failed to fetch profile for UID: ${uid}`);
-    Logger.error(`[Firestore Error] Message: ${error.message}`);
-    Logger.error(`[Firestore Error] Code: ${error.code}`);
-    Logger.error(`[Firestore Error] Device Browser State: ${networkStatus}`);
-    Logger.error(`[Firestore Error] Auth Current User: ${auth.currentUser ? auth.currentUser.uid : "NONE"}`);
-
-    throw error;
+  } catch (privateError) {
+    // If not a permission error, log it as a real issue
+    if (privateError.code !== 'permission-denied') {
+      Logger.warn(`[Firestore] Unexpected error fetching private profile for ${uid}:`, privateError.code);
+    } else {
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserProfile', 'FAILED', `Private ACCESS DENIED for ${uid.substring(0, 5)}... falling back to public.`);
+    }
+    // Otherwise, proceed silently to public fallback
   }
+
+  // 2. FALLBACK: Public Profile (Basic data, open to all authenticated users)
+  try {
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+    const publicSnap = await getDoc(publicRef);
+
+    if (publicSnap.exists()) {
+      const publicData = publicSnap.data();
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserProfile', 'SUCCESS', `Public profile resolved: ${uid.substring(0, 5)}...`);
+      return {
+        uid: uid,
+        ...publicData,
+        isPublicOnly: true
+      };
+    } else {
+      Logger.warn(`[Firestore] ❌ No public profile exists for ${uid.substring(0, 5)}...`);
+    }
+  } catch (publicError) {
+    Logger.warn(`[Firestore] Profile lookup failed (Private & Public) for ${uid}:`, publicError.code);
+  }
+
+  // 🛡️ EXTREME FALLBACK: Search for identity in connectionRequests if both profile lookups fail
+  try {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) return null;
+
+    // 1. Check if WE were the SENDER of a request to them
+    const q1 = query(
+      collection(db, "connectionRequests"),
+      where("senderId", "==", currentUid),
+      where("receiverId", "==", uid),
+      limit(1)
+    );
+    const snap1 = await getDocs(q1);
+    if (!snap1.empty) {
+      const data = snap1.docs[0].data();
+      if (data.receiverInfo?.userId) {
+        Logger.log(`[Firestore] 🛡️ Identity found in connectionRequest (We sent to them) for ${uid}: ${data.receiverInfo.userId}`);
+        return { uid, userId: data.receiverInfo.userId, isFallback: true };
+      }
+    }
+
+    // 2. Check if THEY were the SENDER of a request to us
+    const q2 = query(
+      collection(db, "connectionRequests"),
+      where("senderId", "==", uid),
+      where("receiverId", "==", currentUid),
+      limit(1)
+    );
+    const snap2 = await getDocs(q2);
+    if (!snap2.empty) {
+      const data = snap2.docs[0].data();
+      if (data.senderInfo?.userId) {
+        Logger.log(`[Firestore] 🛡️ Identity found in connectionRequest (They sent to us) for ${uid}: ${data.senderInfo.userId}`);
+        return { uid, userId: data.senderInfo.userId, isFallback: true };
+      }
+    }
+  } catch (e) {
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserProfile', 'FAILED', `Identity resolution failed for ${uid.substring(0, 5)}...`);
+  }
+
+  return null;
 }
 
 /**
@@ -281,8 +398,13 @@ export async function getUserProfile(uid) {
  * @param updates - Object containing fields to update (bio, photoURL, photoVisibility, photoMetadata, etc.)
  */
 export async function updateUserProfile(uid, updates) {
-  if (!uid) return;
+  Logger.trace('FIRESTORE', 'firestore-service.js', 'updateUserProfile', 'PENDING', `uid=${uid?.substring(0, 5)}...`);
+  if (!uid) {
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateUserProfile', 'FAILED', 'Missing uid');
+    return;
+  }
   try {
+
     const userRef = doc(db, USERS_COLLECTION, uid);
 
     // 🔐 ENCRYPT ONLY PIN (v5.5) — userId MUST remain plain text for Firestore queries
@@ -295,14 +417,76 @@ export async function updateUserProfile(uid, updates) {
 
     // Ensure photoVisibility is sanitized
     if (secureUpdates.photoVisibility && !['private', 'contacts'].includes(secureUpdates.photoVisibility)) {
-        secureUpdates.photoVisibility = 'private';
+      secureUpdates.photoVisibility = 'private';
     }
 
     await setDoc(userRef, { ...secureUpdates, updatedAt: serverTimestamp() }, { merge: true });
-    Logger.log(`[Firestore] ✅ Updated profile for ${uid}`);
+
+    // Sync public fields to Public Collection
+    const publicFields = ['userId', 'displayName', 'photoURL', 'photoVisibility', 'photoMetadata', 'bio'];
+    const publicUpdates = {};
+    let hasPublicUpdates = false;
+
+    for (const field of publicFields) {
+      if (field in updates) {
+        publicUpdates[field] = updates[field];
+        hasPublicUpdates = true;
+      }
+    }
+
+    if (hasPublicUpdates) {
+      const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+      await setDoc(publicRef, { ...publicUpdates, updatedAt: serverTimestamp() }, { merge: true });
+    }
+
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateUserProfile', 'SUCCESS', `Updated profile for ${uid.substring(0, 5)}...`);
   } catch (error) {
-    Logger.error("Error updating user profile:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateUserProfile', 'FAILED', error.message);
     throw error;
+  }
+}
+
+/**
+ * 🛠️ REPAIR PUBLIC PROFILE
+ * Fetches the private profile, decrypts identity, and ensures the public profile is in sync.
+ * @param {string} uid - User UID
+ */
+export async function repairPublicProfile(uid) {
+  if (!uid) return;
+  try {
+    const profile = await getUserProfile(uid);
+    // If we only have public data, we can't repair from it (no source of truth)
+    if (!profile || profile.isPublicOnly) {
+      Logger.warn(`[Firestore] 🛠️ Cannot repair ${uid.substring(0, 5)}...: No private profile access.`);
+      return;
+    }
+
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+    const publicFields = ['userId', 'displayName', 'photoURL', 'photoVisibility', 'photoMetadata', 'bio', 'dhPublicKey', 'v6PublicKeys'];
+    const publicUpdates = {};
+
+    for (const field of publicFields) {
+      if (profile[field] !== undefined) {
+        publicUpdates[field] = profile[field];
+      }
+    }
+
+    // Always ensure userId is present if it's in the private profile
+    if (profile.userId && !publicUpdates.userId) {
+      publicUpdates.userId = profile.userId;
+    }
+
+    if (Object.keys(publicUpdates).length > 0) {
+      Logger.log(`[Firestore] 🛠️ Writing repair to public profile for ${uid.substring(0, 5)}...`, Object.keys(publicUpdates));
+      await setDoc(publicRef, {
+        ...publicUpdates,
+        updatedAt: serverTimestamp(),
+        lastSeen: serverTimestamp()
+      }, { merge: true });
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'repairPublicProfile', 'SUCCESS', `Public profile repaired for ${uid.substring(0, 5)}...`);
+    }
+  } catch (error) {
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'repairPublicProfile', 'FAILED', error.message);
   }
 }
 
@@ -316,14 +500,28 @@ export async function updateUserProfile(uid, updates) {
  */
 export async function publishDhPublicKey(uid, dhPublicKeyBase64) {
   try {
+    const currentUid = auth.currentUser?.uid;
+    Logger.log(`[Firestore] Publishing DH key for ${uid.substring(0, 5)}... (Active Session: ${currentUid?.substring(0, 5) || "None"})`);
+
+    if (uid !== currentUid) {
+      Logger.warn(`[Firestore] ⚠️ UID mismatch detected during DH publication! Target: ${uid}, Auth: ${currentUid}`);
+    }
+
     const userRef = doc(db, USERS_COLLECTION, uid);
-    await setDoc(userRef, { dhPublicKey: dhPublicKeyBase64 }, { merge: true });
-    Logger.log(`[Firestore] ✅ DH public key published for ${uid.substring(0, 5)}...`);
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+
+    await Promise.all([
+      setDoc(userRef, { dhPublicKey: dhPublicKeyBase64 }, { merge: true }),
+      setDoc(publicRef, { dhPublicKey: dhPublicKeyBase64 }, { merge: true })
+    ]);
+
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'publishDhPublicKey', 'SUCCESS', `DH key published for ${uid.substring(0, 5)}...`);
   } catch (error) {
-    Logger.error("Error publishing DH public key:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'publishDhPublicKey', 'FAILED', error.message);
     throw error;
   }
 }
+
 
 /**
  * Publishes this user's v6 public keys (DH + ML-KEM-768) to their Firestore profile.
@@ -337,8 +535,17 @@ export async function publishDhPublicKey(uid, dhPublicKeyBase64) {
  */
 export async function publishV6PublicKeys(uid, dhPublicKey, pqcPublicKey, identityPublicKey, capabilitiesSignature) {
   try {
+    const currentUid = auth.currentUser?.uid;
+    Logger.log(`[Firestore] Publishing v6 PQC keys for ${uid.substring(0, 5)}... (Active Session: ${currentUid?.substring(0, 5) || "None"})`);
+
+    if (uid !== currentUid) {
+      Logger.warn(`[Firestore] ⚠️ UID mismatch detected during v6 publication! Target: ${uid}, Auth: ${currentUid}`);
+    }
+
     const userRef = doc(db, USERS_COLLECTION, uid);
-    await setDoc(userRef, {
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+
+    const keyPayload = {
       v6PublicKeys: {
         dh: dhPublicKey,
         pqc: pqcPublicKey,
@@ -346,13 +553,20 @@ export async function publishV6PublicKeys(uid, dhPublicKey, pqcPublicKey, identi
         signature: capabilitiesSignature,
         updatedAt: serverTimestamp()
       }
-    }, { merge: true });
-    Logger.log(`[Firestore] ✅ v6 PQC public keys published for ${uid.substring(0, 5)}...`);
+    };
+
+    await Promise.all([
+      setDoc(userRef, keyPayload, { merge: true }),
+      setDoc(publicRef, keyPayload, { merge: true })
+    ]);
+
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'publishV6PublicKeys', 'SUCCESS', `v6 keys published for ${uid.substring(0, 5)}...`);
   } catch (error) {
-    Logger.error("Error publishing v6 public keys:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'publishV6PublicKeys', 'FAILED', error.message);
     throw error;
   }
 }
+
 
 /**
  * Fetches a user's X25519 DH public key from Firestore.
@@ -363,14 +577,16 @@ export async function publishV6PublicKeys(uid, dhPublicKey, pqcPublicKey, identi
  */
 export async function fetchDhPublicKey(uid) {
   try {
-    const userRef = doc(db, USERS_COLLECTION, uid);
-    const snap = await getDoc(userRef);
+    // Keys should now be read from the Public collection so others can access them
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+    const snap = await getDoc(publicRef);
     if (snap.exists() && snap.data().dhPublicKey) {
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'fetchDhPublicKey', 'SUCCESS', `DH key fetched for ${uid.substring(0, 5)}...`);
       return snap.data().dhPublicKey;
     }
     return null;
   } catch (error) {
-    Logger.error("Error fetching DH public key:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'fetchDhPublicKey', 'FAILED', error.message);
     return null;
   }
 }
@@ -383,14 +599,16 @@ export async function fetchDhPublicKey(uid) {
  */
 export async function fetchV6PublicKeys(uid) {
   try {
-    const userRef = doc(db, USERS_COLLECTION, uid);
-    const snap = await getDoc(userRef);
+    // Keys should now be read from the Public collection so others can access them
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+    const snap = await getDoc(publicRef);
     if (snap.exists() && snap.data().v6PublicKeys) {
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'fetchV6PublicKeys', 'SUCCESS', `v6 keys fetched for ${uid.substring(0, 5)}...`);
       return snap.data().v6PublicKeys;
     }
     return null;
   } catch (error) {
-    Logger.error("Error fetching v6 public keys:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'fetchV6PublicKeys', 'FAILED', error.message);
     return null;
   }
 }
@@ -412,9 +630,9 @@ export async function saveKeyBackup(uid, convId, encryptedB64) {
       encryptedSecret: encryptedB64,
       updatedAt: serverTimestamp(),
     });
-    Logger.log(`[Firestore] ✅ Key backup saved for conv=${convId.substring(0, 8)}`);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'saveKeyBackup', 'SUCCESS', `Key backup saved: ${convId.substring(0, 8)}`);
   } catch (error) {
-    Logger.error("Error saving key backup:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'saveKeyBackup', 'FAILED', error.message);
   }
 }
 
@@ -430,11 +648,12 @@ export async function fetchKeyBackup(uid, convId) {
     const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", convId);
     const snap = await getDoc(backupRef);
     if (snap.exists() && snap.data().encryptedSecret) {
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'fetchKeyBackup', 'SUCCESS', `Key backup fetched: ${convId.substring(0, 8)}`);
       return snap.data().encryptedSecret;
     }
     return null;
   } catch (error) {
-    Logger.error("Error fetching key backup:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'fetchKeyBackup', 'FAILED', error.message);
     return null;
   }
 }
@@ -447,9 +666,14 @@ export async function deleteUserProfile(uid) {
   if (!uid) return;
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
-    await deleteDoc(userRef);
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, uid);
+    await Promise.all([
+      deleteDoc(userRef),
+      deleteDoc(publicRef)
+    ]);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'deleteUserProfile', 'SUCCESS', `Deleted profile: ${uid.substring(0, 5)}...`);
   } catch (error) {
-    Logger.error("Error deleting user profile:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'deleteUserProfile', 'FAILED', error.message);
     throw error;
   }
 }
@@ -463,9 +687,10 @@ export async function searchUsersByEmail(searchEmail) {
   try {
     const q = query(collection(db, USERS_COLLECTION), where("email", "==", searchEmail));
     const querySnapshot = await getDocs(q);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'searchUsersByEmail', 'SUCCESS', `Found ${querySnapshot.size} matches`);
     return querySnapshot.docs.map((doc) => doc.data());
   } catch (error) {
-    Logger.error("Error searching users:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'searchUsersByEmail', 'FAILED', error.message);
     throw error;
   }
 }
@@ -485,12 +710,13 @@ export async function searchUserByUserId(userId) {
     }
 
     const userDoc = querySnapshot.docs[0];
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'searchUserByUserId', 'SUCCESS', `Found ${userId}`);
     return {
       uid: userDoc.id,
       ...userDoc.data()
     };
   } catch (error) {
-    Logger.error("Error searching user by ID:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'searchUserByUserId', 'FAILED', error.message);
     throw error;
   }
 }
@@ -516,9 +742,10 @@ export async function createConversation(userId1, userId2) {
       createdAt: Timestamp.now(),
     });
 
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'createConversation', 'SUCCESS', `Created conv: ${docRef.id}`);
     return docRef.id;
   } catch (error) {
-    Logger.error("Error creating conversation:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'createConversation', 'FAILED', error.message);
     throw error;
   }
 }
@@ -530,31 +757,40 @@ export async function createConversation(userId1, userId2) {
  * @returns Conversation or null if not found
  */
 export async function getConversationBetweenUsers(userId1, userId2) {
-  try {
-    const currentUid = auth.currentUser?.uid;
-    // Security Rule Optimization: Always query by the current user's UID if they are one of the participants.
-    // This ensures we only "list" documents we actually have read access to.
-    const queryUid = (userId2 === currentUid) ? userId2 : userId1;
+  const currentUid = auth.currentUser?.uid;
+  const queryUid = (userId2 === currentUid) ? userId2 : userId1;
+  const otherUid = (queryUid === userId1) ? userId2 : userId1;
 
-    Logger.log(`[Firestore] Searching conversation (Querying by: ${queryUid.substring(0, 5)}...)`);
+  let attempt = 0;
+  const maxRetries = 2;
 
-    const q = query(
-      collection(db, CONVERSATIONS_COLLECTION),
-      where("participantIds", "array-contains", queryUid)
-    );
+  while (attempt < maxRetries) {
+    try {
+      const q = query(
+        collection(db, CONVERSATIONS_COLLECTION),
+        where("participantIds", "array-contains", queryUid)
+      );
 
-    const querySnapshot = await getDocs(q);
-    const otherUid = (queryUid === userId1) ? userId2 : userId1;
+      const querySnapshot = await getDocs(q);
+      const conversation = querySnapshot.docs.find((doc) => {
+        const data = doc.data();
+        return data.participantIds && Array.isArray(data.participantIds) && data.participantIds.includes(otherUid);
+      });
 
-    const conversation = querySnapshot.docs.find((doc) => {
-      const data = doc.data();
-      return data.participantIds && Array.isArray(data.participantIds) && data.participantIds.includes(otherUid);
-    });
-
-    return conversation ? { id: conversation.id, ...conversation.data() } : null;
-  } catch (error) {
-    Logger.error(`Error getting conversation between ${userId1} and ${userId2}: ${error.message}`, error);
-    throw error;
+      if (conversation) {
+        Logger.trace('FIRESTORE', 'firestore-service.js', 'getConversationBetweenUsers', 'SUCCESS', `Found conv: ${conversation.id}`);
+      }
+      return conversation ? { id: conversation.id, ...conversation.data() } : null;
+    } catch (error) {
+      if (error.code === 'permission-denied' && attempt < maxRetries - 1) {
+        attempt++;
+        Logger.trace('FIRESTORE', 'firestore-service.js', 'getConversationBetweenUsers', 'FAILED', `permission-denied (attempt ${attempt}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 300 * attempt));
+        continue;
+      }
+      Logger.trace('FIRESTORE', 'firestore-service.js', 'getConversationBetweenUsers', 'FAILED', error.message);
+      throw error;
+    }
   }
 }
 
@@ -572,12 +808,13 @@ export async function getUserConversations(userId) {
     );
 
     const querySnapshot = await getDocs(q);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserConversations', 'SUCCESS', `Found ${querySnapshot.size} convs`);
     return querySnapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     }));
   } catch (error) {
-    Logger.error("Error getting conversations:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'getUserConversations', 'FAILED', error.message);
     throw error;
   }
 }
@@ -591,7 +828,9 @@ export async function getUserConversations(userId) {
  * @returns Message ID
  */
 export async function sendMessage(conversationId, senderId, encryptedText, replyTo = null, scheduledSeconds = 0, type = 'text', ephemeralDuration = 0, options = {}) {
+  Logger.trace('FIRESTORE', 'firestore-service.js', 'sendMessage', 'PENDING', `conv=${conversationId?.substring(0, 5)}... type=${type}`);
   try {
+
     const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
     const serverTime = Timestamp.now();
     const { encVersion = null, mimeType = null } = options || {};
@@ -650,10 +889,10 @@ export async function sendMessage(conversationId, senderId, encryptedText, reply
       await updateDoc(conversationRef, updates);
     }
 
-    Logger.log(`[Firestore] ✅ Message sent to conv: ${conversationId.substring(0, 5)}...`);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'sendMessage', 'SUCCESS', `Sent msg: ${docRef.id}`);
     return docRef.id;
   } catch (error) {
-    Logger.error("Error sending message:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'sendMessage', 'FAILED', error.message);
     throw error;
   }
 }
@@ -671,9 +910,10 @@ export async function uploadChatImage(uri, conversationId) {
     const filename = `chats/${conversationId}/${Date.now()}.jpg`;
     const objectRef = storageRefFn(storage, filename);
     await uploadBytes(objectRef, blob);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'uploadChatImage', 'SUCCESS', `Uploaded image to storage`);
     return await getDownloadURL(objectRef);
   } catch (error) {
-    Logger.error("Error uploading image:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'uploadChatImage', 'FAILED', error.message);
     throw error;
   }
 }
@@ -688,13 +928,12 @@ export async function updateProfilePhotoMetadata(uid, metadata, visibility = 'pr
   try {
     const userRef = doc(db, USERS_COLLECTION, uid);
     await updateDoc(userRef, {
-      photoMetadata: metadata,
       photoVisibility: visibility,
       updatedAt: serverTimestamp()
     });
-    Logger.log(`[Firestore] ✅ Secure photo metadata updated for ${uid}`);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateProfilePhotoMetadata', 'SUCCESS', `Updated photo metadata for ${uid.substring(0, 5)}...`);
   } catch (error) {
-    Logger.error("Error updating photo metadata:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateProfilePhotoMetadata', 'FAILED', error.message);
     throw error;
   }
 }
@@ -706,8 +945,9 @@ export async function updateMessage(conversationId, messageId, updates) {
   try {
     const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
     await setDoc(msgRef, { ...updates, isEdited: true }, { merge: true });
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateMessage', 'SUCCESS', `Edited msg: ${messageId.substring(0, 8)}`);
   } catch (error) {
-    Logger.error("Error updating message:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'updateMessage', 'FAILED', error.message);
     throw error;
   }
 }
@@ -719,8 +959,9 @@ export async function deleteMessageForEveryone(conversationId, messageId) {
   try {
     const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
     await setDoc(msgRef, { isDeleted: true, encryptedText: "" }, { merge: true });
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'deleteMessageForEveryone', 'SUCCESS', `Deleted msg: ${messageId.substring(0, 8)}`);
   } catch (error) {
-    Logger.error("Error deleting message:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'deleteMessageForEveryone', 'FAILED', error.message);
     throw error;
   }
 }
@@ -732,8 +973,9 @@ export async function hardDeleteMessage(conversationId, messageId) {
   try {
     const msgRef = doc(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION, messageId);
     await deleteDoc(msgRef);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'hardDeleteMessage', 'SUCCESS', `Hard deleted msg: ${messageId.substring(0, 8)}`);
   } catch (error) {
-    Logger.error("Error hard deleting message:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'hardDeleteMessage', 'FAILED', error.message);
     throw error;
   }
 }
@@ -752,10 +994,11 @@ export async function deleteMessageForMe(conversationId, messageId, userId) {
       const hiddenFor = data.hiddenFor || [];
       if (!hiddenFor.includes(userId)) {
         await setDoc(msgRef, { hiddenFor: [...hiddenFor, userId] }, { merge: true });
+        Logger.trace('FIRESTORE', 'firestore-service.js', 'deleteMessageForMe', 'SUCCESS', `Hid msg: ${messageId.substring(0, 8)}`);
       }
     }
   } catch (error) {
-    Logger.error("Error hiding message:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'deleteMessageForMe', 'FAILED', error.message);
     throw error;
   }
 }
@@ -769,6 +1012,7 @@ export async function getConversationMessages(conversationId) {
   try {
     const messagesRef = collection(db, CONVERSATIONS_COLLECTION, conversationId, MESSAGES_SUBCOLLECTION);
     const querySnapshot = await getDocs(messagesRef);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'getConversationMessages', 'SUCCESS', `Fetched ${querySnapshot.size} msgs`);
     return querySnapshot.docs
       .map((doc) => ({
         id: doc.id,
@@ -776,7 +1020,7 @@ export async function getConversationMessages(conversationId) {
       }))
       .sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
   } catch (error) {
-    Logger.error("Error getting messages:", error);
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'getConversationMessages', 'FAILED', error.message);
     throw error;
   }
 }
@@ -801,6 +1045,12 @@ export function subscribeToMessages(conversationId, callback) {
         .sort((a, b) => a.timestamp.toMillis() - b.timestamp.toMillis());
 
       callback(messages);
+    }, (error) => {
+      if (error?.code === "permission-denied") {
+        Logger.warn(`[Firestore] subscribeToMessages: permission-denied for ${conversationId.substring(0, 5)}... (transient auth lag)`);
+        return;
+      }
+      Logger.error("Error in messages listener:", error);
     });
   } catch (error) {
     Logger.error("Error subscribing to messages:", error);
@@ -815,11 +1065,14 @@ export function subscribeToMessages(conversationId, callback) {
  * @returns Unsubscribe function
  */
 export function subscribeToConversations(userId, callback, onError) {
+  Logger.trace('FIRESTORE', 'firestore-service.js', 'subscribeToConversations', 'PENDING', `uid=${userId?.substring(0, 5)}...`);
   if (!userId) {
     // Return a no-op unsubscribe if called before auth is ready
+    Logger.trace('FIRESTORE', 'firestore-service.js', 'subscribeToConversations', 'FAILED', 'Missing userId');
     Logger.warn("[Firestore] subscribeToConversations called without userId — skipping.");
     return () => { };
   }
+
   try {
     const q = query(
       collection(db, CONVERSATIONS_COLLECTION),
@@ -879,6 +1132,12 @@ export function subscribeToContactNicknames(userId, callback) {
         nicknames[doc.id] = doc.data().nickname;
       });
       callback(nicknames);
+    }, (error) => {
+      if (error?.code === "permission-denied") {
+        Logger.warn("[Firestore] subscribeToContactNicknames: permission-denied (auth token still propagating)");
+        return;
+      }
+      Logger.error("[Firestore] Error in nicknames listener:", error);
     });
   } catch (error) {
     Logger.error("Error subscribing to nicknames:", error);
@@ -1023,12 +1282,18 @@ export async function updateUserPresence(userId, isOnline, silent = false) {
   try {
     if (!silent) Logger.log(`[Firestore] Updating presence for ${userId} to ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
     const userRef = doc(db, USERS_COLLECTION, userId);
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, userId);
     const data = {
       isOnline,
-      lastSeen: Timestamp.now() // Use Client Time (2026) to match Date.now() checks
+      lastSeen: Timestamp.now()
     };
-    await setDoc(userRef, data, { merge: true });
-    if (!silent) Logger.log(`[Firestore] ✅ Presence updated successfully: ${userId} is now ${isOnline ? 'ONLINE' : 'OFFLINE'}`);
+    
+    await Promise.all([
+      setDoc(userRef, data, { merge: true }),
+      setDoc(publicRef, data, { merge: true })
+    ]);
+    
+    if (!silent) Logger.log(`[Firestore] ✅ Presence mirrored (private & public) for ${userId.substring(0, 5)}...`);
   } catch (error) {
     if (!silent) {
       Logger.error(`[Firestore] ❌ Error updating presence for ${userId}:`, error);
@@ -1050,14 +1315,29 @@ export async function updateUserPresence(userId, isOnline, silent = false) {
 export function subscribeToUserPresence(userId, callback) {
   if (!userId) return () => { };
   try {
-    const userRef = doc(db, USERS_COLLECTION, userId);
-    return onSnapshot(userRef, (docSnap) => {
+    Logger.log(`[Firestore] Subscribing to presence for ${userId.substring(0, 5)}...`);
+    // 🛡️ MOBILE FIX: Use Public collection for presence to avoid 'Permission Denied' on private users doc
+    const publicRef = doc(db, PUBLIC_PROFILES_COLLECTION, userId);
+    return onSnapshot(publicRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
+        Logger.log(`[Firestore] Presence update for ${userId.substring(0, 5)}...: ${data.isOnline}`);
         callback({ isOnline: data.isOnline, lastSeen: data.lastSeen });
       } else {
-        callback(null);
+        // Fallback to private if possible (for same-user or if rules allow)
+        const userRef = doc(db, USERS_COLLECTION, userId);
+        getDoc(userRef).then(snap => {
+           if (snap.exists()) callback({ isOnline: snap.data().isOnline, lastSeen: snap.data().lastSeen });
+           else callback(null);
+        }).catch(() => callback(null));
       }
+    }, (error) => {
+      if (error?.code === "permission-denied") {
+        // Log this specifically to track if public collection is also restricted
+        Logger.warn(`[Firestore] subscribeToUserPresence: permission-denied for PUBLIC doc ${userId.substring(0, 5)}...`);
+        return;
+      }
+      Logger.error("Error in presence listener:", error);
     });
   } catch (error) {
     Logger.error("Error subscribing to presence:", error);
@@ -1170,62 +1450,91 @@ export async function toggleMessageReaction(conversationId, messageId, userId, e
 /**
  * Sends a connection request to another user
  */
-export async function sendConnectionRequest(senderUid, receiverUid, senderInfo) {
+export async function sendConnectionRequest(senderUid, receiverUid, senderInfo, receiverInfo = null) {
+  if (!senderUid || !receiverUid) throw new Error("Missing UIDs");
+
   try {
-    if (!senderUid || !receiverUid) {
-      throw new Error("Missing sender or receiver UID");
+    // 1. Check if they are already connected
+    const q = query(
+      collection(db, "conversations"),
+      where("participantIds", "array-contains", senderUid)
+    );
+    const snap = await getDocs(q);
+    const existing = snap.docs.find(d => d.data().participantIds.includes(receiverUid));
+
+    if (existing) {
+      return { status: 'already_connected', conversationId: existing.id };
     }
 
-    // Safety: ensure receiver exists
-    const receiverSnap = await getDoc(doc(db, USERS_COLLECTION, receiverUid));
-    if (!receiverSnap.exists()) {
-      throw new Error("Target user does not exist");
-    }
-    // 1. Check if already connected
-    const existingConv = await getConversationBetweenUsers(senderUid, receiverUid);
-    if (existingConv) return { status: 'already_connected', conversationId: existingConv.id };
-
-    // 2. Check for outgoing pending request
-    const q1 = query(
+    // 2. Check if a request already exists in either direction
+    const qOut = query(
       collection(db, "connectionRequests"),
       where("senderId", "==", senderUid),
       where("receiverId", "==", receiverUid),
       where("status", "==", "pending")
     );
-    const snap1 = await getDocs(q1);
-    if (!snap1.empty) return { status: 'request_sent_already' };
+    const snapOut = await getDocs(qOut);
+    if (!snapOut.empty) return { status: 'request_sent_already' };
 
-    // 3. Check for incoming pending request
-    const q2 = query(
+    const qIn = query(
       collection(db, "connectionRequests"),
       where("senderId", "==", receiverUid),
       where("receiverId", "==", senderUid),
       where("status", "==", "pending")
     );
-    const snap2 = await getDocs(q2);
-    if (!snap2.empty) {
-      // B already sent a request to A. Auto-accept it.
-      const requestId = snap2.docs[0].id;
+    const snapIn = await getDocs(qIn);
+    if (!snapIn.empty) {
+      // Auto-accept reciprocal request
+      const requestId = snapIn.docs[0].id;
       await respondToConnectionRequest(requestId, 'accepted', receiverUid, senderUid);
       return { status: 'success', autoAccepted: true };
     }
 
-    // 4. Create new request
+    // 3. Create new request
     await addDoc(collection(db, "connectionRequests"), {
       senderId: senderUid,
       receiverId: receiverUid,
-      senderInfo: {
-        userId: senderInfo.userId,
-        uid: senderUid
-      },
+      senderInfo,
+      receiverInfo, 
       status: 'pending',
       createdAt: serverTimestamp(),
     });
-
     return { status: 'success' };
   } catch (error) {
     Logger.error("Error sending connection request:", error);
     throw error;
+  }
+}
+
+/**
+ * Subscribes to the full user profile (including ID, PIN, Bio)
+ * @param userId - Target User UID
+ * @param callback - Function(data)
+ */
+export function subscribeToUserProfile(userId, callback) {
+  if (!userId) return () => { };
+  try {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    return onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.userId) data.userId = IdentitySecurityService.decryptFromCloud(data.userId, userId);
+        Logger.log(`[Firestore] 🔔 Profile update for ${userId.substring(0, 5)}... ID: ${data.userId}`);
+        callback(data);
+      } else {
+        Logger.warn(`[Firestore] 🔔 Profile listener: Doc NOT FOUND for ${userId.substring(0, 5)}...`);
+        callback(null);
+      }
+    }, (error) => {
+      if (error?.code === "permission-denied") {
+        Logger.warn(`[Firestore] subscribeToUserProfile: permission-denied for ${userId.substring(0, 5)}... (transient auth lag)`);
+        return;
+      }
+      Logger.error("Error in profile listener:", error);
+    });
+  } catch (error) {
+    console.error("Error setting up profile subscription:", error);
+    return () => { };
   }
 }
 
@@ -1249,6 +1558,10 @@ export function subscribeToIncomingRequests(receiverUid, callback) {
       Logger.log(`[Firestore] Received ${requests.length} pending requests for ${receiverUid}`);
       callback(requests);
     }, (error) => {
+      if (error?.code === "permission-denied") {
+        Logger.warn(`[Firestore] subscribeToIncomingRequests: permission-denied for ${receiverUid.substring(0, 5)}... (auth lag)`);
+        return;
+      }
       Logger.error("[Firestore] error in subscribeToIncomingRequests:", error);
     });
   } catch (error) {
@@ -1278,29 +1591,6 @@ export async function respondToConnectionRequest(requestId, status, senderId, re
   }
 }
 
-/**
-     * Subscribes to the full user profile (including ID, PIN, Bio)
-     * @param userId - Target User UID
-     * @param callback - Function(data)
-     */
-export function subscribeToUserProfile(userId, callback) {
-  if (!userId) return () => { };
-  try {
-    const userRef = doc(db, USERS_COLLECTION, userId);
-    return onSnapshot(userRef, (docSnap) => {
-      if (docSnap.exists()) {
-        callback(docSnap.data());
-      } else {
-        callback(null);
-      }
-    }, (error) => {
-      console.error("Error subscribing to profile:", error);
-    });
-  } catch (error) {
-    console.error("Error setting up profile subscription:", error);
-    return () => { };
-  }
-}
 
 /**
  * Resets the unread count for a specific user in a conversation
@@ -1347,16 +1637,27 @@ export async function saveAccountKeyBackup(uid, backupData) {
  * @returns Backup data or null
  */
 export async function fetchAccountKeyBackup(uid) {
-  try {
-    const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", "account_identity");
-    const snap = await getDoc(backupRef);
-    if (snap.exists()) {
-      return snap.data();
+  let attempt = 0;
+  const maxRetries = 2;
+
+  while (attempt < maxRetries) {
+    try {
+      const backupRef = doc(db, USERS_COLLECTION, uid, "keyBackups", "account_identity");
+      const snap = await getDoc(backupRef);
+      if (snap.exists()) {
+        return snap.data();
+      }
+      return null;
+    } catch (error) {
+      if (error.code === 'permission-denied' && attempt < maxRetries - 1) {
+        attempt++;
+        Logger.warn(`[Firestore] fetchAccountKeyBackup: permission-denied (attempt ${attempt}/${maxRetries}). Retrying...`);
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+        continue;
+      }
+      Logger.error("Error fetching account key backup:", error);
+      return null;
     }
-    return null;
-  } catch (error) {
-    Logger.error("Error fetching account key backup:", error);
-    return null;
   }
 }
 

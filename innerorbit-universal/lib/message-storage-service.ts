@@ -13,6 +13,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Logger } from './logger';
 import { encryptWithDeviceKey, decryptWithDeviceKey } from './encryption';
+import { isMobile } from '../utils/platform';
+import { SQLiteVault } from './storage/sqlite-vault';
 
 const MSG_CACHE_PREFIX = '@innerorbit_msg_cache_';
 
@@ -25,9 +27,23 @@ export const MessageStorageService = {
    */
   async saveMessage(conversationId: string, messageId: string, plaintext: string): Promise<void> {
     try {
-      const key = `${MSG_CACHE_PREFIX}${conversationId}_${messageId}`;
-      const encrypted = await encryptWithDeviceKey(plaintext);
-      await AsyncStorage.setItem(key, encrypted);
+      if (isMobile) {
+        // 🛡️ MOBILE: Use SQLite Vault
+        await SQLiteVault.getInstance().saveMessage({
+          id: messageId,
+          conversation_id: conversationId,
+          sender_id: 'unknown', // Metadata might be missing here, SyncManager handles full sync
+          timestamp: Date.now(),
+          type: 'text',
+          status: 'read',
+          is_me: 0
+        }, plaintext);
+      } else {
+        // 🌐 WEB/DESKTOP: Fallback to AsyncStorage
+        const key = `${MSG_CACHE_PREFIX}${conversationId}_${messageId}`;
+        const encrypted = await encryptWithDeviceKey(plaintext);
+        await AsyncStorage.setItem(key, encrypted);
+      }
     } catch (e) {
       Logger.warn('[MessageStorage] Failed to save message to cache:', e);
     }
@@ -40,6 +56,11 @@ export const MessageStorageService = {
    */
   async getMessage(conversationId: string, messageId: string): Promise<string | null> {
     try {
+      if (isMobile) {
+        const msg = await SQLiteVault.getInstance().getMessageById(messageId);
+        return msg ? msg.plaintext : null;
+      }
+
       const key = `${MSG_CACHE_PREFIX}${conversationId}_${messageId}`;
       const encrypted = await AsyncStorage.getItem(key);
       if (!encrypted) return null;
@@ -55,6 +76,17 @@ export const MessageStorageService = {
    */
   async getMessagesForChat(conversationId: string, messageIds: string[]): Promise<Record<string, string>> {
     try {
+      if (isMobile && messageIds.length > 0) {
+        // 🛡️ MOBILE: Optimized batch fetch from SQLite
+        const messages = await SQLiteVault.getInstance().getMessagesByIds(messageIds);
+        const results: Record<string, string> = {};
+        for (const msg of messages) {
+          results[msg.id] = msg.plaintext;
+        }
+        return results;
+      }
+
+      // 🌐 WEB/DESKTOP: Fallback to AsyncStorage
       const keys = messageIds.map(id => `${MSG_CACHE_PREFIX}${conversationId}_${id}`);
       const pairs = await AsyncStorage.multiGet(keys);
       
@@ -80,6 +112,12 @@ export const MessageStorageService = {
    */
   async clearChat(conversationId: string): Promise<void> {
     try {
+      if (isMobile) {
+        // 🛡️ MOBILE: Clear from SQLite Vault
+        await SQLiteVault.getInstance().clearConversationMessages(conversationId);
+      }
+      
+      // Also clear from AsyncStorage (cleanup legacy or shared keys)
       const allKeys = await AsyncStorage.getAllKeys();
       const chatKeys = allKeys.filter(k => k.startsWith(`${MSG_CACHE_PREFIX}${conversationId}_`));
       await AsyncStorage.multiRemove(chatKeys);
@@ -89,3 +127,5 @@ export const MessageStorageService = {
     }
   }
 };
+
+

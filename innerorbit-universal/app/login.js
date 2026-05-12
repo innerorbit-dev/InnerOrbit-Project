@@ -75,18 +75,18 @@ export default function LoginScreen() {
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     // Web Client ID (Required for Expo Go and Web)
-    webClientId: Constants.expoConfig?.extra?.googleWebClientId || process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "323992704792-48r7m9im1vlagch4ab16j0q2q83l2maf.apps.googleusercontent.com",
+    webClientId: Constants.expoConfig?.extra?.googleWebClientId || process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || "323992704792-vm2ufgnjecmja1vnikr7n16ihigouva0.apps.googleusercontent.com",
 
     // Native Android Client ID (Linked to your SHA-1 Fingerprint)
     androidClientId: Constants.expoConfig?.extra?.googleAndroidClientId || process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || "323992704792-ppj00cmjjn7kdg5bvb6gvfq951lnk220.apps.googleusercontent.com",
 
     // For iOS (Expo Go), we fallback to Web Client ID until a native iOS ID is created
-    iosClientId: Constants.expoConfig?.extra?.googleIosClientId || process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || "323992704792-48r7m9im1vlagch4ab16j0q2q83l2maf.apps.googleusercontent.com",
+    iosClientId: Constants.expoConfig?.extra?.googleIosClientId || process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || "323992704792-vm2ufgnjecmja1vnikr7n16ihigouva0.apps.googleusercontent.com",
     // STANDARD PACKAGE SCHEME (Required for Google Android Client ID validation)
     redirectUri: makeRedirectUri({
       scheme: "com.innerorbit.calcx",
     }),
-  });
+  }, { skip: isWeb }); // Prune Web initialization to avoid interference with Firebase Redirect
 
   useEffect(() => {
     if (request) {
@@ -144,7 +144,7 @@ export default function LoginScreen() {
         publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
       }
 
-      // Navigation is handled by _layout.js auth listener to prevent double-navigation
+      router.replace("/home");
     } catch (error) {
       setIsTransitioning(false);
       showError(error);
@@ -337,9 +337,18 @@ export default function LoginScreen() {
   const [showPin, setShowPin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(false); // Defer navigation until persistence modal is dismissed
   const [focusedInput, setFocusedInput] = useState(null);
   const [isBiometricAvailable, setIsBiometricAvailable] = useState(false);
   const cardSwipeAnim = useRef(new Animated.Value(0)).current;
+
+  // Navigate to /home after persistence modal is dismissed
+  useEffect(() => {
+    if (pendingNavigation && !showPersistencePrompt) {
+      setPendingNavigation(false);
+      router.replace("/home");
+    }
+  }, [pendingNavigation, showPersistencePrompt]);
 
   const handleBiometricAuth = async () => {
     try {
@@ -351,8 +360,8 @@ export default function LoginScreen() {
       });
       if (result.success) {
         await AsyncStorage.setItem("isAppUnlocked", "true");
-        setIsDecoyMode(false);
-        router.replace("/home");
+        setIsDecoyMode(false, 'Biometric-Manual');
+        // Navigation is handled by _layout.js auth listener
       }
     } catch (e) { Logger.warn('Manual Bio Auth Failed', e); }
   };
@@ -459,8 +468,8 @@ export default function LoginScreen() {
           if (result.success) {
             // Unlock successful: mark session as transition-ready
             await AsyncStorage.setItem("isAppUnlocked", "true");
-            setIsDecoyMode(false);
-            router.replace("/home");
+            setIsDecoyMode(false, 'Biometric-App-Lock');
+            // Navigation is handled by _layout.js auth listener
           }
         }
       } catch (e) {
@@ -647,39 +656,25 @@ export default function LoginScreen() {
             onPress: () => {
               setAlertConfig(prev => ({ ...prev, visible: false }));
               setWelcomeData(null);
-
-              // Smooth transition based on platform
-              setIsTransitioning(true);
-
-              if (isWeb) {
-                // Web: Show loading skeleton
-                setTimeout(() => {
-                  router.replace("/home");
-                }, 800);
+              // If persistence modal is showing, defer navigation
+              if (showPersistencePrompt) {
+                setPendingNavigation(true);
               } else {
-                // Mobile/Desktop: Quick fade (No manual redirect needed)
-                setTimeout(() => {
-                  setAlertConfig(prev => ({ ...prev, visible: false }));
-                }, 300);
+                router.replace("/home");
               }
             }
           }]
         });
       } else {
-        // Skip modal and go directly to home with smooth transition
-        setIsTransitioning(true);
-
-        if (isWeb) {
-          // Web: Show loading skeleton
-          setTimeout(() => {
-            router.replace("/home");
-          }, 800);
+        // If persistence modal is showing, defer navigation until it's dismissed
+        if (showPersistencePrompt) {
+          setPendingNavigation(true);
         } else {
-          // Mobile/Desktop: Quick transition (No manual redirect needed)
-          setIsTransitioning(false);
+          router.replace("/home");
         }
       }
     } catch (error) {
+      setIsTransitioning(false);
       showError(error);
     } finally {
       setLoading(false);
@@ -712,8 +707,14 @@ export default function LoginScreen() {
         publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
       }
 
-      router.replace("/home");
+      // Defer navigation if persistence modal is showing
+      if (showPersistencePrompt) {
+        setPendingNavigation(true);
+      } else {
+        router.replace("/home");
+      }
     } catch (error) {
+      setIsTransitioning(false);
       showError(error);
     } finally {
       setLoading(false);
@@ -734,8 +735,11 @@ export default function LoginScreen() {
           publishMyKeysOnLogin(currentUid).catch(e => Logger.warn("[Ratchet] Key publish failed:", e));
         }
 
-        // REMOVED: router.push("/home") 
-        // We rely on the auth state listener in _layout.js to handle the transition smoothly.
+        if (showPersistencePrompt) {
+          setPendingNavigation(true);
+        } else {
+          router.replace("/home");
+        }
       } catch (error) {
         setIsTransitioning(false);
         setGoogleLoading(false);
@@ -890,43 +894,8 @@ export default function LoginScreen() {
   };
 
   // Transition Overlay
-  // Unified Transition Overlay (Harmonized with Global isUnlocking)
-  if ((isTransitioning || (user && !isLoggingOut && !loading)) && !alertConfig.visible) {
-    if (isWeb) {
-      // Web: Loading Skeleton
-      return (
-        <View style={{ flex: 1, backgroundColor: THEME.background }}>
-          <StatusBar style="light" />
-          <View style={{ flex: 1, padding: 40, justifyContent: 'center', alignItems: 'center' }}>
-            {/* Skeleton Header */}
-            <View style={{ width: '100%', maxWidth: 400, gap: 20 }}>
-              <View style={{ height: 60, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16, overflow: 'hidden' }}>
-                <Animated.View style={{
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: 'rgba(255,255,255,0.1)',
-                  transform: [{ translateX: fadeAnim.interpolate({ inputRange: [0, 1], outputRange: [-400, 400] }) }]
-                }} />
-              </View>
-              <View style={{ height: 100, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 }} />
-              <View style={{ height: 100, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 16 }} />
-              <View style={{ height: 50, backgroundColor: 'rgba(251, 113, 133, 0.2)', borderRadius: 16 }} />
-            </View>
-            <Text style={{ marginTop: 40, color: THEME.textSecondary, fontSize: 14 }}>Loading your secure workspace...</Text>
-          </View>
-        </View>
-      );
-    } else {
-      // Mobile/Desktop: Simple Fade
-      return (
-        <View style={{ flex: 1, backgroundColor: THEME.background, justifyContent: 'center', alignItems: 'center' }}>
-          <StatusBar style="light" />
-          <Image source={LOGO_IMG} style={{ width: 80, height: 80 }} resizeMode="contain" />
-          <Text style={{ marginTop: 20, color: THEME.text, fontSize: 20, fontWeight: '600', letterSpacing: 1 }}>InnerOrbit</Text>
-        </View>
-      );
-    }
-  }
+  // REMOVED: Unified Transition Overlay to prevent navigation deadlocks
+  // The global _layout.js now handles minimal blocking to ensure a smooth transition.
 
   return (
     <>
@@ -1102,8 +1071,8 @@ export default function LoginScreen() {
                           }
                         }}
                         underlineColorAndroid="transparent"
-                        textContentType="emailAddress"
-                        autoComplete="email"
+                        textContentType="none"
+                        autoComplete="off"
                       />
                     </View>
                     {/* Custom Email Validation Tooltip - Replacing native browser popup style */}
@@ -1192,8 +1161,8 @@ export default function LoginScreen() {
                             }
                           }}
                           underlineColorAndroid="transparent"
-                          textContentType="password"
-                          autoComplete="password"
+                          textContentType="none"
+                          autoComplete="off"
                         />
                         {password.length > 0 && (
                           <Pressable
@@ -1254,6 +1223,7 @@ export default function LoginScreen() {
                           returnKeyType={allowUserIdLogin ? "go" : "next"}
                           onSubmitEditing={() => allowUserIdLogin ? handlePinSignIn() : pinRef.current?.focus()}
                           underlineColorAndroid="transparent"
+                          autoComplete="off"
                         />
                       </View>
                     </View>
@@ -1290,6 +1260,7 @@ export default function LoginScreen() {
                           returnKeyType="go"
                           onSubmitEditing={handlePinSignIn}
                           underlineColorAndroid="transparent"
+                          autoComplete="off"
                         />
                         {pin.length > 0 && (
                           <Pressable

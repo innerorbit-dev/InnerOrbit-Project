@@ -88,36 +88,21 @@ export const ProfileDetailView = ({
   isInline
 }) => {
   const isMobile = isMobileLayout;
-  const [showId, setShowId] = useState(false);
-  const [decryptedId, setDecryptedId] = useState(null);
-  const [isDecryptingId, setIsDecryptingId] = useState(false);
+  const isIdLoading = ['Loading...', 'Syncing...', 'Wait...'].includes(myUserId) || !myUserId;
+  const [idCopied, setIdCopied] = useState(false);
 
-  // MEMORY HARDENING: Clear plain-text ID when hiding or unmounting
-  React.useEffect(() => {
-    if (!showId) {
-      setDecryptedId(null);
-    }
-    return () => {
-      setDecryptedId(null);
-    };
-  }, [showId]);
-
-  const handleToggleId = async () => {
-    if (!showId) {
-      setIsDecryptingId(true);
+  const handleCopyId = async () => {
+    if (!isIdLoading && myUserId) {
       try {
-        const { userId } = await IdentitySecurityService.getLocalIdentity();
-        setDecryptedId(userId || myUserId); // Fallback to prop if not in secure store
-        setShowId(true);
-      } catch (error) {
-        Logger.error("[ProfileView] ID Decryption failed:", error);
-      } finally {
-        setIsDecryptingId(false);
+        await Clipboard.setStringAsync ? Clipboard.setStringAsync(myUserId) : Clipboard.setString(myUserId);
+        setIdCopied(true);
+        setTimeout(() => setIdCopied(false), 2000);
+      } catch (e) {
+        Logger.error("[ProfileView] ID copy failed:", e);
       }
-    } else {
-      setShowId(false);
     }
   };
+
   return (
     <DetailWrapper THEME={THEME} isInline={isInline} title="Profile Settings" subtitle="Identity and public status on the network.">
       <View style={{ flexDirection: (isLargeDesktop && !isInline) ? 'row' : 'column', gap: isInline ? 8 : 40 }}>
@@ -144,33 +129,33 @@ export const ProfileDetailView = ({
           </Pressable>
 
           <Pressable
-            onPress={handleToggleId}
-            disabled={isDecryptingId}
+            onPress={handleCopyId}
+            disabled={isIdLoading}
             style={({ pressed }) => ({
               marginTop: 16,
               paddingHorizontal: 16,
               paddingVertical: 8,
-              backgroundColor: `${THEME.primary}14`,
+              backgroundColor: idCopied ? `${THEME.success}20` : `${THEME.primary}14`,
               borderRadius: 20,
               flexDirection: 'row',
               alignItems: 'center',
               justifyContent: 'center',
-              opacity: (pressed || isDecryptingId) ? 0.8 : 1,
+              opacity: (pressed || isIdLoading) ? 0.8 : 1,
               minWidth: 140,
               minHeight: 36
             })}
           >
-            {isDecryptingId ? (
+            {isIdLoading ? (
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={{ color: THEME.primary, fontSize: 11, fontWeight: '700', marginRight: 6 }}>Loading...</Text>
+                <Text style={{ color: THEME.primary, fontSize: 13, fontWeight: '800', marginRight: 8 }}>ID: </Text>
                 <LoadingDots color={THEME.primary} size={3} gap={1.5} />
               </View>
             ) : (
               <>
-                <Text style={{ color: THEME.primary, fontSize: 13, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5, marginRight: 8 }}>
-                  ID: {showId ? (decryptedId || '••••••••') : '••••••••'}
+                <Text style={{ color: idCopied ? THEME.success : THEME.primary, fontSize: 13, fontWeight: '800', textAlign: 'center', letterSpacing: 0.5, marginRight: 8 }}>
+                  {idCopied ? 'Copied!' : `ID: ${myUserId}`}
                 </Text>
-                <Feather name={showId ? "eye-off" : "eye"} size={12} color={THEME.primary} />
+                <Feather name={idCopied ? "check" : "copy"} size={12} color={idCopied ? THEME.success : THEME.primary} />
               </>
             )}
           </Pressable>
@@ -337,13 +322,6 @@ export const ProfileDetailView = ({
           </View>
         </View>
       </View>
-      
-      <PinWarningModal 
-        visible={showWarningModal} 
-        onClose={() => setShowWarningModal(false)} 
-        onConfirm={confirmDisableCloudSync} 
-        THEME={THEME} 
-      />
     </DetailWrapper>
   );
 };
@@ -408,13 +386,15 @@ export const SecurityDetailView = ({
   const handleTogglePin = async () => {
     if (!showPin) {
       setIsDecryptingPin(true);
+      Logger.log("[SecurityView] Initiating PIN reveal...");
       try {
         // Transient Decryption Flow
         const { pin } = await IdentitySecurityService.getLocalIdentity();
         setDecryptedPin(pin);
+        Logger.log("[SecurityView] PIN reveal successful. Transient state updated.");
         setShowPin(true);
       } catch (error) {
-        Logger.error("[SecurityView] PIN Decryption failed:", error);
+        Logger.error("[SecurityView] PIN reveal failed:", error);
       } finally {
         setIsDecryptingPin(false);
       }
@@ -1042,61 +1022,79 @@ export const PrivacyDetailView = ({
   );
 };
 
-export const ConnectDetailView = ({ THEME, myUserId, user, showSuccess, isInline }) => (
+export const ConnectDetailView = ({ THEME, myUserId, user, showSuccess, isInline }) => {
+  const isLoading = ['Loading...', 'Syncing...', 'Wait...'].includes(myUserId) || !myUserId;
+  return (
   <DetailWrapper THEME={THEME} isInline={isInline} title="Connect" subtitle="Scan this QR code with another device to link them.">
-    <View style={{
-      backgroundColor: THEME.background,
-      padding: isInline ? 8 : 30,
-      borderRadius: isInline ? 12 : 30,
-      ...select({
-        ios: {
-          shadowColor: THEME.primary,
-          shadowOffset: { width: 0, height: 10 },
-          shadowOpacity: 0.2,
-          shadowRadius: 20,
-        },
-        android: {
-          elevation: 10,
-        },
-        web: {
-          boxShadow: `0px 10px 20px ${THEME.primary}`,
-        },
-      }),
-      alignSelf: 'center',
-      marginBottom: isInline ? 12 : 20,
-      borderWidth: 0
-    }}>
-      <QRCode
-        value={JSON.stringify({
-          type: 'add-contact',
-          userId: myUserId,
-          name: user?.displayName || "User"
-        })}
-        size={isInline ? 150 : 300}
-        color={THEME.primary}
-        backgroundColor="transparent"
-        logo={require('../../assets/icon.png')}
-        logoSize={isInline ? 30 : 60}
-        logoBackgroundColor={THEME.surface}
-        logoMargin={2}
-        logoBorderRadius={10}
-      />
-    </View>
+    {isLoading ? (
+      <View style={{ alignSelf: 'center', marginBottom: isInline ? 12 : 20, padding: isInline ? 20 : 40, alignItems: 'center' }}>
+        <LoadingDots color={THEME.primary} size={6} gap={4} />
+      </View>
+    ) : (
+      <View style={{
+        backgroundColor: THEME.background,
+        padding: isInline ? 8 : 30,
+        borderRadius: isInline ? 12 : 30,
+        ...select({
+          ios: {
+            shadowColor: THEME.primary,
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.2,
+            shadowRadius: 20,
+          },
+          android: {
+            elevation: 10,
+          },
+          web: {
+            boxShadow: `0px 10px 20px ${THEME.primary}`,
+          },
+        }),
+        alignSelf: 'center',
+        marginBottom: isInline ? 12 : 20,
+        borderWidth: 0
+      }}>
+        <QRCode
+          value={JSON.stringify({
+            type: 'add-contact',
+            userId: myUserId,
+            name: user?.displayName || "User"
+          })}
+          size={isInline ? 150 : 300}
+          color={THEME.primary}
+          backgroundColor="transparent"
+          logo={require('../../assets/icon.png')}
+          logoSize={isInline ? 30 : 60}
+          logoBackgroundColor={THEME.surface}
+          logoMargin={2}
+          logoBorderRadius={10}
+        />
+      </View>
+    )}
 
     <View style={{ marginTop: isInline ? 12 : 40, alignItems: 'center' }}>
       <Pressable
         onPress={() => {
-          Clipboard.setString(myUserId);
-          showSuccess("User ID Copied to Clipboard");
+          if (!isLoading) {
+            Clipboard.setString(myUserId);
+            showSuccess("User ID Copied to Clipboard");
+          }
         }}
-        style={{ backgroundColor: isInline ? THEME.navRail : THEME.surface, paddingHorizontal: isInline ? 12 : 24, paddingVertical: isInline ? 6 : 12, borderRadius: 12, borderWidth: 0, flexDirection: 'row', alignItems: 'center' }}
+        disabled={isLoading}
+        style={{ backgroundColor: isInline ? THEME.navRail : THEME.surface, paddingHorizontal: isInline ? 12 : 24, paddingVertical: isInline ? 6 : 12, borderRadius: 12, borderWidth: 0, flexDirection: 'row', alignItems: 'center', opacity: isLoading ? 0.5 : 1 }}
       >
-        <Text style={{ color: THEME.primary, fontSize: isInline ? 14 : 24, fontWeight: '700', letterSpacing: 2, marginRight: 12 }}>{myUserId}</Text>
-        <Feather name="copy" size={18} color={THEME.textSecondary} />
+        {isLoading ? (
+          <LoadingDots color={THEME.primary} size={5} gap={3} />
+        ) : (
+          <>
+            <Text style={{ color: THEME.primary, fontSize: isInline ? 14 : 24, fontWeight: '700', letterSpacing: 2, marginRight: 12 }}>{myUserId}</Text>
+            <Feather name="copy" size={18} color={THEME.textSecondary} />
+          </>
+        )}
       </Pressable>
     </View>
   </DetailWrapper>
-);
+  );
+};
 
 export const StealthDetailView = ({
   THEME,

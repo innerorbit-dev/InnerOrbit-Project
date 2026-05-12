@@ -11,6 +11,7 @@ import React, { useState } from "react";
 import {
   View, Text, StyleSheet, Pressable, TextInput,
   ActivityIndicator, Animated, Modal, KeyboardAvoidingView, Platform,
+  useWindowDimensions,
 } from "react-native";
 import { isWeb, select } from "../../utils/platform";
 import { Feather } from "@expo/vector-icons";
@@ -19,12 +20,15 @@ import { auth } from "../../lib/firebase";
 import { LoadingDots } from "../ui/loading-dots";
 
 export const GoogleSecurityPrompt = ({ THEME, onComplete, onSkip, showError, showSuccess, isNudge = false }) => {
+    const { width } = useWindowDimensions();
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [showPass, setShowPass] = useState(false);
     const [loading, setLoading] = useState(false);
     const [slideAnim] = useState(new Animated.Value(isNudge ? 80 : 0));
     const [fadeAnim] = useState(new Animated.Value(isNudge ? 0 : 1));
+
+    const isLargeScreen = width > 600;
 
     React.useEffect(() => {
         if (isNudge) {
@@ -108,7 +112,11 @@ export const GoogleSecurityPrompt = ({ THEME, onComplete, onSkip, showError, sho
                 statusBarTranslucent
                 onRequestClose={handleSkip}
             >
-                <Animated.View style={[styles.nudgeOverlay, { opacity: fadeAnim }]}>
+                <Animated.View style={[
+                    styles.nudgeOverlay,
+                    { opacity: fadeAnim },
+                    isLargeScreen && { alignItems: 'center' }
+                ]}>
                     {/* Tap outside to skip */}
                     <Pressable style={StyleSheet.absoluteFill} onPress={handleSkip} />
 
@@ -116,6 +124,13 @@ export const GoogleSecurityPrompt = ({ THEME, onComplete, onSkip, showError, sho
                         style={[
                             styles.nudgeSheet,
                             { backgroundColor: THEME.surface, borderColor: THEME.border },
+                            isLargeScreen && {
+                                maxWidth: 500,
+                                width: '90%',
+                                alignSelf: 'center',
+                                marginBottom: 24,
+                                borderRadius: 28,
+                            },
                             { transform: [{ translateY: slideAnim }] },
                         ]}
                     >

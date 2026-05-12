@@ -14,6 +14,7 @@ import { useFonts, Outfit_400Regular, Outfit_600SemiBold, Outfit_700Bold } from 
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
 import * as WebBrowser from 'expo-web-browser';
+import { auth } from '../lib/firebase';
 import { NetworkProvider } from '../context/network-context';
 import { CallProvider, useCall } from '../context/call-context';
 import { SessionExpiredModal } from '../components/session-expired-modal';
@@ -26,11 +27,11 @@ import { registerBackgroundUpdateTask } from '../lib/background-tasks';
 import InstallerWizard from '../components/setup/InstallerWizard';
 import DesktopTitleBar from '../components/ui/DesktopTitleBar';
 import { LOGO_BASE64 } from '../lib/logo-base64';
-import { WebRTCService } from "../lib/webrtc-service";
 import { LoadingDots } from '../components/ui/loading-dots';
 import { ActiveVoiceCall } from "../components/calling/ActiveVoiceCall";
 import { IncomingCallModal } from "../components/calling/IncomingCallModal";
 import { useAntiCapture } from '../lib/anti-capture-service';
+import { isMobile } from '../utils/platform';
 
 import { ErrorBoundary as CustomErrorBoundary } from '../components/error-boundary';
 export { CustomErrorBoundary as ErrorBoundary };
@@ -63,12 +64,12 @@ SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
   useAntiCapture(); // 🛡️ Activate global protection life-cycle
-  const { user, loading: authLoading, isLoggingOut, isDecoyMode, isUnlocking, welcomeData } = useAuth();
+  const { user, loading: authLoading, isLoggingOut, isDecoyMode, isUnlocking, isBiometricLocked, welcomeData, hasSessionHint } = useAuth();
   const { theme, loading: themeLoading } = useAppTheme();
   const segments = useSegments();
   const router = useRouter();
 
-  const { activeCall, incomingCall, answerCall, rejectCall, hangUp } = useCall();
+  const { activeCall, incomingCall, answerCall, rejectCall, hangUp, remoteStream, micMuted, toggleMute } = useCall();
 
   const [fontsLoaded, fontsError] = useFonts({
     Outfit_400Regular, Outfit_600SemiBold, Outfit_700Bold,
@@ -163,12 +164,43 @@ function RootLayoutNav() {
     }
   }, []);
 
-  const isReady = fontsLoaded && !authLoading && !themeLoading;
+  const [authResolved, setAuthResolved] = useState(false);
+
+  useEffect(() => {
+    if (!authLoading) {
+      // If we have a session hint but no user yet, wait up to 2s for Firebase to fully resolve
+      // This prevents the "Login then Home" flicker on cold start.
+      if (hasSessionHint && !user) {
+        const timer = setTimeout(() => {
+          Logger.log("[Layout] ⏳ Session hint wait timeout - proceeding");
+          setAuthResolved(true);
+        }, 2000);
+        return () => clearTimeout(timer);
+      } else {
+        setAuthResolved(true);
+      }
+    } else {
+      // Reset if auth starts loading again (e.g. on sign out/in)
+      setAuthResolved(false);
+    }
+  }, [authLoading, user, hasSessionHint]);
+
+  const isReady = fontsLoaded && authResolved && !themeLoading;
   const [isSettled, setIsSettled] = useState(false);
+
+  // DEBUG LOGGING
+  useEffect(() => {
+    Logger.log(`[Layout] 🔍 State Check: fontsLoaded=${fontsLoaded}, authLoading=${authLoading}, authResolved=${authResolved}, themeLoading=${themeLoading}, isReady=${isReady}`);
+  }, [fontsLoaded, authLoading, authResolved, themeLoading, isReady]);
 
   useEffect(() => {
     if (isReady && !isLoggingOut) {
-      const timer = setTimeout(() => setIsSettled(true), 100);
+      Logger.log(`[Layout] 🛠️ isReady=${isReady}, authLoading=${authLoading}, themeLoading=${themeLoading}. Settling...`);
+      // PERFORMANCE: Reduced settle time from 100ms to 30ms
+      const timer = setTimeout(() => {
+        Logger.log("[Layout] 🏁 State Settled");
+        setIsSettled(true);
+      }, 30);
       return () => clearTimeout(timer);
     } else {
       setIsSettled(false);
@@ -176,34 +208,94 @@ function RootLayoutNav() {
   }, [isReady, isLoggingOut]);
 
   const isPublicRoute = segments.length === 0 || segments[0] === "login" || segments[0] === "signup";
-  const shouldBlockRender = isReady && user && isPublicRoute && !(isDecoyMode && segments.length === 0) && !welcomeData;
+  const shouldBlockRender = 
+    (isReady && user && isPublicRoute && !(isDecoyMode && segments.length === 0) && !welcomeData);
+
+  // SAFETY: Force-dismiss shouldBlockRender after 3s to prevent deadlocks
+  const [blockOverride, setBlockOverride] = useState(false);
+  useEffect(() => {
+    if (shouldBlockRender && !blockOverride) {
+      Logger.log(`[Layout] 🚧 shouldBlockRender is TRUE — Starting 3s safety timeout`);
+      const safetyTimer = setTimeout(() => {
+        Logger.warn(`[Layout] ⚠️ shouldBlockRender safety timeout hit — Force dismissing preloader`);
+        setBlockOverride(true);
+      }, 3000);
+      return () => clearTimeout(safetyTimer);
+    }
+    if (!shouldBlockRender) {
+      setBlockOverride(false); // Reset override when condition naturally clears
+    }
+  }, [shouldBlockRender, blockOverride]);
+
+  const effectiveBlockRender = shouldBlockRender && !blockOverride;
 
   useEffect(() => {
-    if (!isReady || !isSettled || isLoggingOut) return;
-    const isPrivate = segments[0] === "home" || segments[0] === "chat-detail";
-    const isDecoy = segments.length === 0 || segments[0] === "CalcX";
-    const isAuth = segments[0] === "login" || segments[0] === "signup";
+    if (!isReady || !isSettled || isLoggingOut) {
+      return;
+    }
 
-    if (!user) {
-      if (isPrivate && !isNavigatingRef.current) {
-        Logger.log(`[Layout] 👮 Private route [${segments[0]}] protected -> Redirecting to Root`);
-        isNavigatingRef.current = true;
-        router.replace("/");
-      } else if (!isDecoyMode && isDecoy && segments[0] !== 'login' && !isNavigatingRef.current) {
-        Logger.log("[Layout] 👮 Public route protected -> Redirecting to Login");
-        isNavigatingRef.current = true;
-        router.replace("/login");
+    const routingGuard = async () => {
+      // 🛡️ NAVIGATION LOCK
+      if (isNavigatingRef.current) return;
+
+      const isAuthGroup = segments[0] === 'login' || segments[0] === 'signup';
+      const isRoot = segments.length === 0;
+
+      // 🛡️ UNLOCK GRACE PERIOD: Allow a 5-second window where routing protection is bypassed.
+      const now = Date.now();
+      let persistentGrace = 0;
+      if (isWeb && typeof sessionStorage !== 'undefined') {
+        const stored = sessionStorage.getItem('__INNERORBIT_UNLOCK_GRACE_PERIOD');
+        if (stored) persistentGrace = parseInt(stored, 10);
       }
-    } else {
-      if (isWeb || !isDecoyMode) {
-        if ((isDecoy || isAuth) && !isNavigatingRef.current && !welcomeData) {
-          Logger.log("[Layout] 🛡️ Auth/Decoy route detected while logged in -> Redirecting to Home");
+      const isWithinGracePeriod = (globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD && now < globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD) ||
+        (persistentGrace && now < persistentGrace);
+
+      if (isWithinGracePeriod) {
+        Logger.log(`[Layout] 🛡️ Unlock Grace Period active -> Bypassing protection loop`);
+        return;
+      }
+
+      // 🛡️ PROTECTED TRANSITIONS: Don't redirect while biometric/decoy unlock is in progress
+      if (isUnlocking || isBiometricLocked) {
+        Logger.log("[Layout] 🛡️ Protected transition in progress -> Holding navigation");
+        return;
+      }
+
+      if (!user) {
+        // 🛡️ UNAUTHENTICATED
+        if (!isAuthGroup && !isRoot) {
+          Logger.log(`[Layout] 👮 Protected route [${segments[0]}] -> Redirecting to Login`);
           isNavigatingRef.current = true;
-          router.replace("/home");
+          router.replace("/login");
+        }
+      } else {
+        // 🛡️ AUTHENTICATED
+        if (isDecoyMode) {
+          // If Decoy Mode is active, we MUST be at Root (Calculator)
+          if (!isRoot && !isAuthGroup) {
+            Logger.log("[Layout] 🛡️ Decoy Mode active -> Redirecting to Calculator");
+            isNavigatingRef.current = true;
+            router.replace("/");
+          }
+        } else {
+          // If NOT Decoy Mode, we MUST NOT be at Login or Root (unless onboarding)
+          if ((isAuthGroup || isRoot) && !welcomeData) {
+            Logger.log("[Layout] 🛡️ Auth route detected while logged in -> Redirecting to Home");
+            isNavigatingRef.current = true;
+            router.replace("/home");
+          }
         }
       }
-    }
-  }, [user, segments, isReady, isDecoyMode]);
+
+      // Safety: Release lock after 500ms
+      setTimeout(() => {
+        isNavigatingRef.current = false;
+      }, 500);
+    };
+
+    routingGuard();
+  }, [user, segments, isReady, isSettled, isLoggingOut, isUnlocking, isBiometricLocked, isDecoyMode, welcomeData]);
 
   useEffect(() => {
     if (isReady) {
@@ -212,14 +304,28 @@ function RootLayoutNav() {
       if (typeof window !== 'undefined' && window.electron && typeof window.electron.hidePreloader === 'function') {
         window.electron.hidePreloader();
       }
+
+      // 🔄 Trigger Initial Sync on Mobile
+      if (user && !isDecoyMode && isMobile) {
+        // Use dynamic require to prevent 'ExpoSQLite' error on Web
+        try {
+          const { SyncManager } = require('../lib/storage/sync-manager');
+          SyncManager.getInstance().performFullSync(user.uid).catch(err => {
+            Logger.error('[Layout] 🔄 Sync failed:', err);
+          });
+        } catch (e) {
+          Logger.error('[Layout] 🔄 Sync Manager loading failed:', e);
+        }
+      }
     }
-  }, [isReady]);
+  }, [isReady, user, isDecoyMode]);
 
   // --- PRELOADER ANIMATION ---
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const showPreloader = !isReady || effectiveBlockRender;
 
   useEffect(() => {
-    if (!isReady || shouldBlockRender) {
+    if (showPreloader) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
@@ -237,17 +343,19 @@ function RootLayoutNav() {
         ])
       ).start();
     }
-  }, [isReady, shouldBlockRender]);
+  }, [showPreloader]);
 
   if (isSetupMode) {
     return <InstallerWizard onComplete={handleSetupComplete} />;
   }
 
-  if (!isReady || shouldBlockRender) {
+  // PERFORMANCE FIX: Only use early return when isReady is false (fonts/auth/theme not loaded).
+  // These conditions resolve from system callbacks and don't require the Stack to be mounted.
+  if (!isReady) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: theme.background }}>
         <StatusBar style={theme.background === '#000000' ? "light" : "dark"} />
-        <View style={{ marginBottom: 32, padding: 24, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 32 }}>
+        <View style={{ marginBottom: 32, padding: 24, backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 40 }}>
           <Animated.Image
             source={{ uri: LOGO_BASE64 }}
             style={{
@@ -258,7 +366,7 @@ function RootLayoutNav() {
             resizeMode="contain"
           />
         </View>
-        <LoadingDots color={theme.primary} size={10} gap={5} showText />
+        <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 8 }} />
       </View>
     );
   }
@@ -280,6 +388,9 @@ function RootLayoutNav() {
           <Stack.Screen name="CalcX" options={{ animation: 'fade' }} />
           <Stack.Screen name="user-profile" options={{ animation: 'slide_from_right' }} />
         </Stack>
+
+        {/* REMOVED: effectiveBlockRender overlay to prevent deadlocks and allow direct interaction. */}
+
         <SessionExpiredModal
           visible={showExpiredModal}
           onConfirm={() => setShowExpiredModal(false)}
@@ -287,7 +398,7 @@ function RootLayoutNav() {
         />
 
         {/* Global Calling Layer */}
-        <IncomingCallModal 
+        <IncomingCallModal
           visible={!!incomingCall}
           callerName={incomingCall?.callerName || "Private Contact"}
           onAnswer={answerCall}
@@ -296,9 +407,12 @@ function RootLayoutNav() {
 
         {activeCall && (
           <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]}>
-            <ActiveVoiceCall 
+            <ActiveVoiceCall
               peerName={activeCall.peerName || activeCall.callerName || "Contact"}
               onHangUp={hangUp}
+              remoteStream={remoteStream}
+              isMuted={micMuted}
+              onToggleMute={toggleMute}
             />
           </View>
         )}

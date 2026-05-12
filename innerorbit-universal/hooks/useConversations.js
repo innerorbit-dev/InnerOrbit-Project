@@ -70,7 +70,9 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
                   try {
                     const key = deriveConversationKey(conv.id, conv.participantIds);
                     const otherUid = conv.participantIds.find(id => id !== user.uid);
-                    preview = await decryptAsync(preview, key, conv.id, undefined, user.uid, otherUid);
+                    const decResult = await decryptAsync(preview, key, conv.id, undefined, user.uid, otherUid);
+                    // Unwrap sealed-sender object { text, senderId } if returned
+                    preview = (decResult && typeof decResult === 'object' && decResult.text) ? decResult.text : decResult;
                     if (preview === "🔒 Encrypted Message" || preview === "🔒 Decryption Failed") {
                       Logger.warn(`[useConversations] Notification decrypt failed conv=${conv.id.substring(0, 5)} version=${getCipherVersion(conv)}`);
                     }
@@ -102,9 +104,20 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
             try {
               const otherUserUid = conv.participantIds.find((id) => id !== user.uid);
               if (otherUserUid) {
-                let otherUser = null;
+                let profile = null;
                 try {
-                  otherUser = await firestoreService.getUserProfile(otherUserUid);
+                  profile = await firestoreService.getUserProfile(otherUserUid);
+                  // Update profile in conversation data
+                  if (profile) {
+                    conv.otherUserId = profile.userId || "Unknown";
+                    conv.otherUserPhoto = profile.photoURL || null;
+                    conv.otherUserBio = profile.bio || null;
+                    conv.isOnline = profile.isOnline || false;
+                    conv.lastSeen = profile.lastSeen || null;
+                  } else {
+                    // Extreme fallback: No profile in Private, Public, or connectionRequests
+                    conv.otherUserId = "Unknown";
+                  }
                 } catch (e) { }
 
                 let lastMessage = conv.lastMessage;
@@ -127,9 +140,11 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
                     try {
                       const key = deriveConversationKey(conv.id, conv.participantIds);
                       Logger.log(`[useConversations] 🔑 Decrypt: conv=${conv.id.substring(0,5)}, pIds=${conv.participantIds?.length}, skPrefix=${key.substring(0,8)}`);
-                      lastMessage = await decryptAsync(lastMessage, key, conv.id, undefined, user.uid, otherUserUid);
-                      if (lastMessage === "🔒 Encrypted Message" || lastMessage === "🔒 Decryption Failed") {
-                        Logger.warn(`[useConversations] Preview decrypt failed conv=${conv.id.substring(0, 5)} version=${getCipherVersion(conv)}`);
+                      const decResult = await decryptAsync(lastMessage, key, conv.id, undefined, user.uid, otherUserUid);
+                      // Unwrap sealed-sender object { text, senderId } if returned
+                      lastMessage = (decResult && typeof decResult === 'object' && decResult.text) ? decResult.text : decResult;
+                      if (typeof lastMessage === 'string' && lastMessage.startsWith('🔒')) {
+                        Logger.warn(`[useConversations] Preview decrypt failed conv=${conv.id.substring(0, 5)} version=${getCipherVersion(conv)} result=${lastMessage.substring(0,30)}`);
                         lastMessage = "";
                       }
                     } catch (e) {
@@ -138,13 +153,15 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
                   }
                 }
 
+                const displayName = profile?.userId || nicknames[otherUserUid] || "Unknown";
+                
                 return {
                   ...conv,
                   unreadCount: conv[`unreadCount_${user.uid}`] || 0,
                   lastMessage,
                   otherUserUid,
-                  otherUserId: otherUser?.userId || "Unknown",
-                  avatarColor: getColorFromId(otherUser?.userId || otherUserUid),
+                  otherUserId: displayName,
+                  avatarColor: getColorFromId(displayName || otherUserUid),
                 };
               }
               return conv;
@@ -211,9 +228,12 @@ export function useConversations(user, isDecoyMode, isDesktop, selectedConversat
 
     uniqueUids.forEach(uid => {
       const unsub = firestoreService.subscribeToUserPresence(uid, (data) => {
-        if (data) {
-          setPresenceMap(prev => ({ ...prev, [uid]: data }));
-        }
+        // Always update presenceMap — even on null (partner logged out / doc deleted).
+        // Skipping null here was causing stale isOnline=true to persist after logout.
+        setPresenceMap(prev => ({
+          ...prev,
+          [uid]: data ?? { isOnline: false, lastSeen: prev[uid]?.lastSeen ?? null }
+        }));
       });
       cleanups.push(unsub);
     });

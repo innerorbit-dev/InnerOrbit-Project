@@ -40,6 +40,15 @@ export function AuthProvider({ children }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false);
 
+  // PERFORMANCE: Synchronous Session Hinting
+  // Check if we previously had an active session to avoid flickering to Login on reload.
+  const [sessionHint, setSessionHint] = useState(() => {
+    if (isWeb && typeof sessionStorage !== 'undefined') {
+      return sessionStorage.getItem('__INNERORBIT_SESSION_HINT') === 'true';
+    }
+    return false;
+  });
+
   // Use session cache as initial values
   const [isDecoyModeInternal, setIsDecoyModeInternal] = useState(lastDecoyState);
   const [isUnlocking, setIsUnlocking] = useState(lastUnlockingState);
@@ -71,9 +80,7 @@ export function AuthProvider({ children }) {
       }
 
       // Initialize SecureStorage cache once per session
-      SecureStorage.init().finally(() => {
-        setAuthLoading(false);
-      });
+      SecureStorage.init();
 
       // Initial sync of decoy state to theme store
       setDecoyMode(lastDecoyState);
@@ -89,6 +96,12 @@ export function AuthProvider({ children }) {
 
   // --- GOOGLE AUTH POST-LOGIN LOGIC ---
   const handleGoogleUser = async (user, saveLogin) => {
+    // 🛡️ UNLOCK GRACE PERIOD: Prevent flicker redirects during session establishment
+    const expiry = Date.now() + 5000;
+    globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = expiry;
+    if (isWeb && typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('__INNERORBIT_UNLOCK_GRACE_PERIOD', expiry.toString());
+    }
     try {
       // Create/Update profile
       const profileData = await createUserProfile(user);
@@ -116,7 +129,7 @@ export function AuthProvider({ children }) {
       if (saveLogin) {
         await SecureStorage.setPersistenceEnabled(true);
         await SecureStorage.saveCredentials(null, null, user.uid);
-        Logger.log("[Auth] ✅ Google Sign-In persisted");
+        Logger.trace('AUTH', 'auth-context.js', 'handleGoogleUser', 'SUCCESS', 'Google Sign-In persisted');
       }
 
       // Track manual login
@@ -125,9 +138,16 @@ export function AuthProvider({ children }) {
       // Track session start for hard timeout (Web: 48h, Mobile: 7d)
       await AsyncStorage.setItem(`session_start_${user.uid}`, Date.now().toString());
 
+      Logger.trace('AUTH', 'auth-context.js', 'handleGoogleUser', 'SUCCESS', `User ${user.uid.substring(0, 8)}`);
+      
+      // PERFORMANCE: Set session hint synchronously for subsequent reloads
+      if (isWeb && typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('__INNERORBIT_SESSION_HINT', 'true');
+      }
+
       return user;
     } catch (err) {
-      Logger.error("Google Post-Login Error:", err);
+      Logger.trace('AUTH', 'auth-context.js', 'handleGoogleUser', 'FAILED', err.message);
       throw err;
     }
   };
@@ -136,18 +156,27 @@ export function AuthProvider({ children }) {
   // --- HANDLE REDIRECT RESULT (Mobile Web) ---
   useEffect(() => {
     if (isWeb) {
+      Logger.log("[Auth] 🔎 Checking for Redirect Result...");
       getRedirectResult(auth)
         .then(async (result) => {
           if (result) {
-            Logger.log("[Auth] ↩️ Recovered from Redirect Sign-In");
+            Logger.log(`[Auth] ↩️ Recovered from Redirect Sign-In for user: ${result.user.uid}`);
             const saveLogin = sessionStorage.getItem('temp_google_auth_persist') === 'true';
             sessionStorage.removeItem('temp_google_auth_persist'); // Clean up
 
-            await handleGoogleUser(result.user, saveLogin);
+            try {
+              await handleGoogleUser(result.user, saveLogin);
+              Logger.log("[Auth] ✅ Google User handled successfully after redirect");
+            } catch (handleErr) {
+              Logger.error("[Auth] ❌ Failed to handle Google User after redirect:", handleErr);
+              setError(handleErr.message);
+            }
+          } else {
+            Logger.log("[Auth] ℹ️ No redirect result found (Normal load)");
           }
         })
         .catch((error) => {
-          Logger.error("Redirect Sign-In Error:", error);
+          Logger.error("[Auth] ❌ Redirect Sign-In Error:", error);
           setError(error.message);
         });
     }
@@ -202,40 +231,40 @@ export function AuthProvider({ children }) {
         if (currentUser) {
           // 🛡️ SECURITY: Check for Hard Session Expiry
           const sessionStartTime = await AsyncStorage.getItem(`session_start_${currentUser.uid}`);
-          Logger.log(`[Auth] 🔍 Session Check: uid=${currentUser.uid.substring(0, 5)}, start=${sessionStartTime}`);
           
           if (sessionStartTime) {
             const age = Date.now() - parseInt(sessionStartTime);
-            const hoursLeft = (SESSION_TIMEOUT - age) / 3600000;
-            Logger.log(`[Auth] ⏳ Session Age: ${Math.round(age / 3600000)}h, Timeout: ${SESSION_TIMEOUT / 3600000}h, Remaining: ${hoursLeft.toFixed(2)}h`);
-            
             if (age > SESSION_TIMEOUT) {
-              Logger.warn(`[Auth] 🚨 Hard Expiry Reached. Triggering Logout.`);
+              Logger.trace('AUTH', 'auth-context.js', 'onAuthStateChanged', 'FAILED', 'Hard Expiry Reached');
               await logout();
               return;
             }
           } else {
             // First time seeing this user without a timestamp? Set it now.
-            Logger.log("[Auth] ✨ No session timestamp found. Initializing now.");
             await AsyncStorage.setItem(`session_start_${currentUser.uid}`, Date.now().toString());
           }
 
           // 2. 🔐 SECURITY FIX: Publish X25519 and ML-KEM keys (Enables v4/v6 Ratchet)
-          await publishMyKeysOnLogin(currentUser.uid);
+          // PERFORMANCE: Run in background to avoid blocking the preloader resolution if Firestore is slow
+          publishMyKeysOnLogin(currentUser.uid).catch(e => {
+            Logger.warn(`[Auth] Background key publication failed: ${e.message}`);
+          });
 
           // If a user is found, we simply set them. 
           setUser(currentUser);
           try {
-            // 1. Initial Presence Update
+            // 1. Initial Presence Update (Non-blocking)
             const sharePresence = useThemeStore.getState().sharePresence;
-            await PresenceService.publishPresence(sharePresence).catch(() => { });
+            PresenceService.publishPresence(sharePresence).catch(() => { });
 
             // 2. Start Heartbeat (Immediate & Interval)
             // Clear existing to be safe
             if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
 
-            Logger.log("[Auth] ❤️ Starting Sealed Presence Heartbeat...");
+            Logger.trace('AUTH', 'auth-context.js', 'onAuthStateChanged', 'SUCCESS', `Session active: ${currentUser.uid.substring(0, 8)}`);
             presenceIntervalRef.current = setInterval(async () => {
+              if (isLoggingOutRef.current) return; // Don't ping if logging out
+
               // Periodically check if session expired while app is open
               const sessionStartTime = await AsyncStorage.getItem(`session_start_${currentUser.uid}`);
               if (sessionStartTime && (Date.now() - parseInt(sessionStartTime) > SESSION_TIMEOUT)) {
@@ -257,31 +286,41 @@ export function AuthProvider({ children }) {
 
           // Background: Cache profile
           AsyncStorage.setItem("userProfileCache", JSON.stringify(currentUser)).catch(() => { });
+
+          // PERFORMANCE: Ensure session hint is updated on successful auth
+          if (isWeb && typeof sessionStorage !== 'undefined') {
+            sessionStorage.setItem('__INNERORBIT_SESSION_HINT', 'true');
+            setSessionHint(true);
+          }
         } else {
           // User actually signed out according to Firebase
           // 🛡️ SECURITY FIX: For PIN logins, we don't have a Firebase session.
           // If we have a local JS session cache, we MUST NOT clear the user.
           if (lastUserSession && !currentUser) {
-            Logger.log('[Auth] ℹ️ Firebase session empty, but PIN session found. Preserving.');
+            Logger.trace('AUTH', 'auth-context.js', 'onAuthStateChanged', 'SUCCESS', 'Preserving PIN session');
             setUser(lastUserSession);
             setAuthLoading(false);
             return;
           }
 
-          Logger.log('[Auth] ℹ️ No active session found');
+          Logger.trace('AUTH', 'auth-context.js', 'onAuthStateChanged', 'SUCCESS', 'No active session');
           setUser(null);
           lastUserSession = null;
           
           // Clear the cache immediately on true sign-out
           AsyncStorage.removeItem("userProfileCache").catch(() => { });
 
+          // PERFORMANCE: Clear session hint on sign-out
+          if (isWeb && typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem('__INNERORBIT_SESSION_HINT');
+          }
+
           if (!isWeb) {
             await AsyncStorage.removeItem("has_active_session").catch(() => { });
           }
         }
       } catch (err) {
-        Logger.error("🚨 [Auth] CRITICAL: Auth state change failed. Forcing logout to prevent state corruption.", err);
-        if (err?.message) Logger.error(`[Auth] Error Reason: ${err.message}`);
+        Logger.trace('AUTH', 'auth-context.js', 'onAuthStateChanged', 'FAILED', err.message);
         setUser(null);
       } finally {
         setAuthInitialized(true);
@@ -317,7 +356,9 @@ export function AuthProvider({ children }) {
 
       // Handle Foreground
       if (nextAppState === "active") {
-        Logger.log(`[Auth] ☀️ App foregrounded (Grace: ${inGracePeriod})`);
+        // 🔧 DEV: Re-establish Metro WebSocket connection (drops when Hermes pauses in background)
+        if (__DEV__) { console.log('[InnerOrbit] 📡 Metro reconnect ping — foreground resume'); }
+        Logger.trace('AUTH', 'auth-context.js', 'AppState', 'SUCCESS', `Foregrounded (Grace: ${inGracePeriod})`);
         if (lockTimerRef.current) {
           Logger.log("[Auth] 🛡️ Transient background detected - Cancelling lock timer");
           clearTimeout(lockTimerRef.current);
@@ -326,12 +367,13 @@ export function AuthProvider({ children }) {
 
         // Heartbeat Resume
         const currentUser = userRef.current;
-        if (currentUser?.uid || auth.currentUser?.uid) {
+        if ((currentUser?.uid || auth.currentUser?.uid) && !isLoggingOutRef.current) {
           const sharePresence = useThemeStore.getState().sharePresence;
           PresenceService.publishPresence(sharePresence).catch(() => { });
 
           if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
           presenceIntervalRef.current = setInterval(() => {
+            if (isLoggingOutRef.current) return;
             const currentSharePresence = useThemeStore.getState().sharePresence;
             PresenceService.publishPresence(currentSharePresence).catch(() => { });
           }, 60000);
@@ -340,6 +382,7 @@ export function AuthProvider({ children }) {
 
       // Handle Background / Inactive
       if (nextAppState.match(/inactive|background/)) {
+        Logger.trace('AUTH', 'auth-context.js', 'AppState', 'SUCCESS', 'App backgrounded');
         if (presenceIntervalRef.current) {
           clearInterval(presenceIntervalRef.current);
           presenceIntervalRef.current = null;
@@ -356,7 +399,7 @@ export function AuthProvider({ children }) {
           if (!lockTimerRef.current && !isLoggingOutRef.current) {
             Logger.log("[Auth] ⏳ App backgrounded -> Starting 2s lock timer...");
             lockTimerRef.current = setTimeout(() => {
-              Logger.log("[Auth] 🔒 2s timer EXPIRED -> Enforcing DecoyMode");
+              Logger.trace('AUTH', 'auth-context.js', 'AppState', 'SUCCESS', 'Lock timer expired -> Enforcing Decoy');
               setIsDecoyMode(true, 'AppState-Timer');
               lockTimerRef.current = null;
             }, 2000);
@@ -377,7 +420,7 @@ export function AuthProvider({ children }) {
   // Handle web-specific visibility and initial presence
   useEffect(() => {
     const handlePresence = async (isOnline) => {
-      if (user?.uid || auth.currentUser?.uid) {
+      if ((user?.uid || auth.currentUser?.uid) && !isLoggingOutRef.current) {
         const sharePresence = useThemeStore.getState().sharePresence;
         
         if (isOnline) {
@@ -385,6 +428,7 @@ export function AuthProvider({ children }) {
           
           if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
           presenceIntervalRef.current = setInterval(() => {
+            if (isLoggingOutRef.current) return;
             const currentSharePresence = useThemeStore.getState().sharePresence;
             PresenceService.publishPresence(currentSharePresence).catch(() => { });
           }, 60000);
@@ -405,7 +449,7 @@ export function AuthProvider({ children }) {
       handlePresence(document.visibilityState === 'visible');
     };
 
-    const handleBeforeUnload = () => {
+    const handlePageHide = () => {
       if (presenceIntervalRef.current) {
         clearInterval(presenceIntervalRef.current);
         presenceIntervalRef.current = null;
@@ -414,10 +458,10 @@ export function AuthProvider({ children }) {
 
     if (isWeb) {
       document.addEventListener('visibilitychange', handleWebPresence);
-      window.addEventListener('beforeunload', handleBeforeUnload);
+      window.addEventListener('pagehide', handlePageHide);
       return () => {
         document.removeEventListener('visibilitychange', handleWebPresence);
-        window.removeEventListener('beforeunload', handleBeforeUnload);
+        window.removeEventListener('pagehide', handlePageHide);
       };
     }
   }, [user?.uid]);
@@ -431,15 +475,16 @@ export function AuthProvider({ children }) {
           encryptionCapabilities: DEFAULT_ENCRYPTION_CAPABILITIES,
           encryptionUpdatedAt: Date.now(),
         });
+        Logger.trace('AUTH', 'auth-context.js', 'publishCapabilities', 'SUCCESS');
       } catch (e) {
-        Logger.warn("[Auth] Failed to publish encryption capabilities:", e?.message || e);
+        Logger.trace('AUTH', 'auth-context.js', 'publishCapabilities', 'FAILED', e?.message || e);
       }
     };
     publishCapabilities();
   }, [user?.uid]);
 
   const triggerStealthUnlock = async () => {
-    Logger.log("[Auth] 🔑 Initiating Stealth Unlock (V4-GlobalThis)...");
+    Logger.trace('AUTH', 'auth-context.js', 'triggerStealthUnlock', 'SUCCESS', 'Initiating sequence');
 
     // 🛡️ BIOMETRIC CHECK (Mobile Only)
     if (!isWeb) {
@@ -449,13 +494,13 @@ export function AuthProvider({ children }) {
         const isEnrolled = await LocalAuthentication.isEnrolledAsync();
 
         if (bioEnabled === 'true' && hasHardware && isEnrolled) {
-          Logger.log("[Auth] 🛡️ Biometrics enabled - Challenging user...");
+          Logger.trace('AUTH', 'auth-context.js', 'triggerStealthUnlock', 'SUCCESS', 'Challenging Biometrics');
           setIsBiometricLocked(true);
           setIsDecoyMode(false, 'Stealth-Unlock-Bio-Challenge');
           return; // Wait for BiometricLockScreen to call authenticateBiometrics
         }
       } catch (e) {
-        Logger.error("[Auth] Biometric check failed:", e);
+        Logger.trace('AUTH', 'auth-context.js', 'triggerStealthUnlock', 'FAILED', `Biometric check: ${e.message}`);
       }
     }
 
@@ -469,26 +514,23 @@ export function AuthProvider({ children }) {
       await new Promise(resolve => setTimeout(resolve, 800));
 
       // 2. Perform the actual unlock
-      // We set the storage item AND wait for it to be absolutely certain it's there 
-      // although we no longer depend on it in the listener, it's good for system integrity.
       await AsyncStorage.setItem("isAppUnlocked", "true");
 
       // Delay slightly to allow the storage write to flush before state triggers re-renders
       await new Promise(resolve => setTimeout(resolve, 100));
 
       setIsDecoyMode(false, 'Stealth-Unlock');
-      Logger.log('[Auth] 🔓 Stealth Unlock -> Decoy Mode DISABLED');
+      Logger.trace('AUTH', 'auth-context.js', 'triggerStealthUnlock', 'SUCCESS', 'Decoy Mode DISABLED');
 
       // 3. Keep preloader visible during the navigation slide-in
       await new Promise(resolve => setTimeout(resolve, 800));
 
     } catch (e) {
-      Logger.error("[Auth] Unlock sequence error:", e);
+      Logger.trace('AUTH', 'auth-context.js', 'triggerStealthUnlock', 'FAILED', e.message);
     } finally {
       // 4. Fade out preloader (Resilience: Always ensure we unblock UI)
       setIsUnlockingSynced(false);
-      // Note: We DO NOT reset the grace period here. We let it expire naturally.
-      Logger.log("[Auth] ✅ Unlock Sequence Complete.");
+      Logger.trace('AUTH', 'auth-context.js', 'triggerStealthUnlock', 'SUCCESS', 'Sequence Complete');
     }
   };
 
@@ -501,22 +543,23 @@ export function AuthProvider({ children }) {
       });
 
       if (result.success) {
-        Logger.log("[Auth] ✅ Biometric Authentication SUCCESS");
+        Logger.trace('AUTH', 'auth-context.js', 'authenticateBiometrics', 'SUCCESS', 'Biometric match');
         setIsBiometricLocked(false);
         // Continue with normal unlock logic
         setIsUnlockingSynced(true);
-        globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = Date.now() + 5000;
+        const expiry = Date.now() + 5000;
+        globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = expiry;
+        if (isWeb && typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem('__INNERORBIT_UNLOCK_GRACE_PERIOD', expiry.toString());
+        }
         await AsyncStorage.setItem("isAppUnlocked", "true");
         await new Promise(resolve => setTimeout(resolve, 800));
         setIsUnlockingSynced(false);
       } else {
-        Logger.warn("[Auth] ❌ Biometric Authentication FAILED/CANCELLED");
-        // Stay locked
+        Logger.trace('AUTH', 'auth-context.js', 'authenticateBiometrics', 'FAILED', 'Challenge failed/cancelled');
       }
     } catch (e) {
-      Logger.error("[Auth] Biometric Auth Error:", e);
-      // Fallback: if biometrics crash, we shouldn't lock the user out entirely?
-      // Actually, security-wise, they should re-calculate or try again.
+      Logger.trace('AUTH', 'auth-context.js', 'authenticateBiometrics', 'FAILED', e.message);
     }
   };
   const signUp = async (email, password) => {
@@ -527,6 +570,14 @@ export function AuthProvider({ children }) {
       await SecureStorage.clearAllCredentials();
 
       const result = await createUserWithEmailAndPassword(auth, email, password);
+      
+      // 🛡️ UNLOCK GRACE PERIOD: Prevent flicker redirects during session establishment
+      const expiry = Date.now() + 5000;
+      globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = expiry;
+      if (isWeb && typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('__INNERORBIT_UNLOCK_GRACE_PERIOD', expiry.toString());
+      }
+
       const profileData = await createUserProfile(result.user);
 
       // Track session start for hard timeout
@@ -548,26 +599,25 @@ export function AuthProvider({ children }) {
 
       // Don't auto-save credentials on signup - let user decide later
       await SecureStorage.incrementManualLoginCount();
-      Logger.log(`[Auth] ✅ Sign Up SUCCESS: ${profileData.userId}`);
+      Logger.trace('AUTH', 'auth-context.js', 'signUp', 'SUCCESS', `User ${profileData.userId}`);
       return profileData;
     } catch (err) {
-      Logger.error("Sign Up Error:", err);
-
       // Self-Healing Loophole Fix:
       if (err.code === 'auth/email-already-in-use') {
         try {
-          Logger.log("[Auth] Email exists, attempting automatic login to heal profile...");
+          Logger.trace('AUTH', 'auth-context.js', 'signUp', 'SUCCESS', 'Email exists, healing profile');
           const signInResult = await signInWithEmailAndPassword(auth, email, password);
           const profileData = await createUserProfile(signInResult.user);
           return profileData;
 
         } catch (signInErr) {
-          Logger.error("Auto-login failed:", signInErr);
+          Logger.trace('AUTH', 'auth-context.js', 'signUp', 'FAILED', `Healing failed: ${signInErr.message}`);
           throw new Error("Account already exists. Please Log In.");
         }
       }
 
       const errorMessage = err?.message || "Sign up failed";
+      Logger.trace('AUTH', 'auth-context.js', 'signUp', 'FAILED', errorMessage);
       setError(errorMessage);
       throw new Error(errorMessage);
     }
@@ -582,36 +632,40 @@ export function AuthProvider({ children }) {
       await SecureStorage.clearAllCredentials();
 
       const provider = new GoogleAuthProvider();
-      // No prompt:'select_account' — lets returning users re-auth silently without picker.
-
       const isElectron = isWeb && /Electron/i.test(navigator.userAgent);
 
       if (isWeb && !isElectron) {
-        // All web browsers (desktop + mobile): redirect in same tab — no popup
-        Logger.log("[Auth] 🌐 Web -> signInWithRedirect (single tab)");
-        sessionStorage.setItem('temp_google_auth_persist', String(saveLogin));
-        await signInWithRedirect(auth, provider);
-        return;
+        Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogle', 'SUCCESS', 'Attempting Google Popup');
+        try {
+          const result = await signInWithPopup(auth, provider);
+          return await handleGoogleUser(result.user, saveLogin);
+        } catch (popupErr) {
+          if (popupErr.code === 'auth/popup-blocked') {
+            Logger.warn('[Auth] Popup blocked, falling back to redirect');
+            sessionStorage.setItem('temp_google_auth_persist', String(saveLogin));
+            await signInWithRedirect(auth, provider);
+            return;
+          }
+          throw popupErr;
+        }
       } else {
-        // Electron: popup (redirect breaks in Electron renderer)
-        Logger.log("[Auth] ⚡ Electron -> signInWithPopup");
+        Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogle', 'SUCCESS', 'Opening Google Popup');
         const result = await signInWithPopup(auth, provider);
         return await handleGoogleUser(result.user, saveLogin);
       }
     } catch (err) {
-      Logger.error("Google Sign In Error:", err);
-
       // Account-exists conflict: email already registered with password
       if (err.code === 'auth/account-exists-with-different-credential') {
-        const googleCredential = GoogleAuthProvider.credentialFromError(err);
         const email = err.customData?.email || '';
-        Logger.log(`[Auth] 🔗 Account conflict detected for ${email} – prompting link`);
+        Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogle', 'FAILED', `Conflict: ${email}`);
+        const googleCredential = GoogleAuthProvider.credentialFromError(err);
         setPendingGoogleLink({ email, googleCredential });
         setAuthLoading(false);
-        return; // Don't throw – show AccountLinkModal instead
+        return;
       }
 
       const errorMessage = err?.message || "Google Sign In failed";
+      Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogle', 'FAILED', errorMessage);
       setError(errorMessage);
       setAuthLoading(false);
       throw new Error(errorMessage);
@@ -636,11 +690,11 @@ export function AuthProvider({ children }) {
       window.google.accounts.id.initialize({
         client_id: clientId,
         callback: async (response) => {
-          Logger.log("[Auth] 🎯 Google One Tap Response received");
+          Logger.trace('AUTH', 'auth-context.js', 'initializeGoogleOneTap', 'SUCCESS', 'One Tap response received');
           try {
             await signInWithGoogleCredential(response.credential, saveLogin);
           } catch (err) {
-            Logger.error("[Auth] One Tap Sign-In Failed:", err);
+            Logger.trace('AUTH', 'auth-context.js', 'initializeGoogleOneTap', 'FAILED', err.message);
           }
         },
         auto_select: true, // Seamless auth for repeating users
@@ -649,18 +703,14 @@ export function AuthProvider({ children }) {
 
       window.google.accounts.id.prompt((notification) => {
         if (notification.isNotDisplayed()) {
-          Logger.warn("[Auth] ⚠️ One Tap not displayed:", notification.getNotDisplayedReason());
-        } else if (notification.isSkippedMoment()) {
-          Logger.log("[Auth] ⏭️ One Tap skipped:", notification.getSkippedReason());
-        } else if (notification.isDismissedMoment()) {
-          Logger.log("[Auth] ❌ One Tap dismissed:", notification.getDismissedReason());
+          Logger.trace('AUTH', 'auth-context.js', 'initializeGoogleOneTap', 'FAILED', notification.getNotDisplayedReason());
         }
       });
 
       gisClientInitialized = true;
-      Logger.log("[Auth] ✨ Google One Tap Initialized");
+      Logger.trace('AUTH', 'auth-context.js', 'initializeGoogleOneTap', 'SUCCESS', 'Initialized');
     } catch (err) {
-      Logger.error("[Auth] One Tap Init Error:", err);
+      Logger.trace('AUTH', 'auth-context.js', 'initializeGoogleOneTap', 'FAILED', err.message);
     }
   };
 
@@ -668,6 +718,14 @@ export function AuthProvider({ children }) {
     try {
       setError(null);
       setIsDecoyMode(false, 'GoogleCredentialSignIn');
+      
+      // 🛡️ UNLOCK GRACE PERIOD: Prevent flicker redirects during session establishment
+      const expiry = Date.now() + 5000;
+      globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = expiry;
+      if (isWeb && typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('__INNERORBIT_UNLOCK_GRACE_PERIOD', expiry.toString());
+      }
+
       await AsyncStorage.setItem("isAppUnlocked", "true"); // PERMANENT UNLOCK for this session
 
       // Security: Ensure no stale credentials
@@ -679,8 +737,6 @@ export function AuthProvider({ children }) {
       // Create/Update profile
       const profileData = await createUserProfile(result.user);
 
-      // Show Welcome Modal if new user OR returning user (>7 days)
-      // Show Welcome Modal if new user OR returning user OR missing password
       // Show Welcome Modal if new user OR returning user (> 7 days) OR missing password
       if (profileData.isNewUser || profileData.isReturningUser || !profileData.hasSetPassword) {
         let type = profileData.isNewUser ? 'welcome' : 'welcome_back';
@@ -704,26 +760,26 @@ export function AuthProvider({ children }) {
       if (saveLogin || !isWeb) {
         await SecureStorage.setPersistenceEnabled(true);
         await SecureStorage.saveCredentials(null, null, result.user.uid);
-        Logger.log("[Auth] ✅ Google Sign-In persisted locally");
+        Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogleCredential', 'SUCCESS', 'Credentials persisted');
       }
 
       // Track manual login
       await SecureStorage.incrementManualLoginCount();
 
+      Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogleCredential', 'SUCCESS', `User ${result.user.uid.substring(0, 8)}`);
       return result.user;
     } catch (err) {
-      Logger.error("Google Credential Sign In Error:", err);
-
       // Account-exists conflict (One Tap path)
       if (err.code === 'auth/account-exists-with-different-credential') {
-        const googleCredential = GoogleAuthProvider.credentialFromError(err);
         const email = err.customData?.email || '';
-        Logger.log(`[Auth] 🔗 Account conflict (credential path) for ${email}`);
+        Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogleCredential', 'FAILED', `Conflict: ${email}`);
+        const googleCredential = GoogleAuthProvider.credentialFromError(err);
         setPendingGoogleLink({ email, googleCredential });
         return;
       }
 
       const errorMessage = err?.message || "Google Sign In failed";
+      Logger.trace('AUTH', 'auth-context.js', 'signInWithGoogleCredential', 'FAILED', errorMessage);
       setError(errorMessage);
       throw new Error(errorMessage);
     }
@@ -740,6 +796,7 @@ export function AuthProvider({ children }) {
         const seconds = Math.ceil(waitTime / 1000);
         const minutes = Math.ceil(seconds / 60);
         const timeStr = minutes > 1 ? `${minutes} minutes` : `${seconds} seconds`;
+        Logger.trace('AUTH', 'auth-context.js', 'signIn', 'FAILED', `Locked out for ${timeStr}`);
         throw new Error(`Too many failed attempts. Please try again in ${timeStr}.`);
       }
 
@@ -766,7 +823,7 @@ export function AuthProvider({ children }) {
             const localPin = await AsyncStorage.getItem('localAppPin');
             if (localPin && passwordOrPin === localPin) {
               userProfile = await findUserById(emailOrUserId);
-              Logger.log("Authenticated via Local PIN");
+              Logger.trace('AUTH', 'auth-context.js', 'signIn', 'SUCCESS', 'Authenticated via Local PIN');
               await protector.recordSuccess();
             } else {
               await protector.recordFailure();
@@ -778,6 +835,7 @@ export function AuthProvider({ children }) {
         }
 
         if (!userProfile) {
+          Logger.trace('AUTH', 'auth-context.js', 'signIn', 'FAILED', 'User not found or credentials incorrect');
           throw new Error("User not found or credentials incorrect");
         }
 
@@ -790,7 +848,7 @@ export function AuthProvider({ children }) {
           // 🛡️ CRITICAL FIX: Do NOT save PIN as password. Only save password if NOT pin login.
           const passwordToSave = isPinLogin ? null : passwordOrPin;
           await SecureStorage.saveCredentials(userProfile.email, passwordToSave, userProfile.uid);
-          Logger.log(`[Auth] ✅ Login persistence updated (Password saved: ${!isPinLogin})`);
+          Logger.trace('AUTH', 'auth-context.js', 'signIn', 'SUCCESS', `Persistence updated (Password saved: ${!isPinLogin})`);
         }
 
         // Attempt to upgrade to full Firebase session if credentials are saved
@@ -804,11 +862,11 @@ export function AuthProvider({ children }) {
               try {
                 // Run in background (no await) to allow UI to proceed immediately
                 signInWithEmailAndPassword(auth, storedEmail, storedPass)
-                  .then(() => Logger.log("[Auth] 🔐 PIN Login upgraded to Full Session"))
-                  .catch(e => Logger.warn("[Auth] ⚠️ Silent Auth Failed (Pwd changed/invalid):", e.message));
+                  .then(() => Logger.trace('AUTH', 'auth-context.js', 'signIn', 'SUCCESS', 'PIN upgraded to Full Session'))
+                  .catch(e => Logger.trace('AUTH', 'auth-context.js', 'signIn', 'FAILED', `Silent Auth: ${e.message}`));
 
               } catch (e) {
-                Logger.warn("[Auth] Silent Auth Start Error:", e?.message || String(e));
+                Logger.trace('AUTH', 'auth-context.js', 'signIn', 'FAILED', `Silent Auth start: ${e.message}`);
               }
             }
           }
@@ -822,6 +880,10 @@ export function AuthProvider({ children }) {
         };
 
         setUser(appUser);
+        
+        // 🛡️ UNLOCK GRACE PERIOD: Prevent flicker redirects during session establishment
+        globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = Date.now() + 5000;
+
         lastUserSession = appUser; // Cache session for remounts
         
         // Cache PIN for background key backups (Cross-Device Recovery)
@@ -854,25 +916,21 @@ export function AuthProvider({ children }) {
           await IdentitySecurityService.saveIdentityLocally(userProfile.userId, passwordOrPin);
         }
 
-        Logger.log(`[Auth] ✅ PIN Sign-In SUCCESS: ${appUser.userId}`);
+        Logger.trace('AUTH', 'auth-context.js', 'signIn', 'SUCCESS', `PIN login: ${appUser.userId}`);
         return appUser;
       } else {
         // Email/password login
         setIsDecoyMode(false, 'EmailAuth');
-        // Sanitize login log
-        const sanitizedId = typeof emailOrUserId === 'string' && emailOrUserId.includes('@')
-          ? emailOrUserId.split('@')[0].substring(0, 3) + '***'
-          : 'ID: ' + (emailOrUserId?.substring?.(0, 4) || 'hidden');
-
-        Logger.log(`[Auth] 🔐 Attempting login for: ${sanitizedId} (Password len: ${passwordOrPin?.length})`);
         const loginStartTime = Date.now();
 
         const userCredential = await signInWithEmailAndPassword(auth, emailOrUserId, passwordOrPin);
+        
+        // 🛡️ UNLOCK GRACE PERIOD: Prevent flicker redirects during session establishment
+        globalThis.__INNERORBIT_UNLOCK_GRACE_PERIOD = Date.now() + 5000;
+
         await protector.recordSuccess();
 
         // Success! Now we know they have a password. Update Firestore.
-        // OPTIMIZATION: Run Firestore updates in parallel with fetching the profile
-        // This saves ~300-500ms on login
         const { updateUserProfile } = await import("../lib/firestore-service");
 
         // Fire both requests at once
@@ -890,9 +948,6 @@ export function AuthProvider({ children }) {
         }
 
         // Modal logic:
-        // 1. New user -> 'welcome'
-        // 2. Returning user (> 7 days) -> 'welcome_back'
-        // 3. (Implicit) Returning user (< 7 days) with password -> No modal
         if (profileData.isNewUser || profileData.isReturningUser) {
           setWelcomeData({
             userId: profileData.userId,
@@ -907,7 +962,7 @@ export function AuthProvider({ children }) {
         if (immediateSave) {
           await SecureStorage.setPersistenceEnabled(true);
           await SecureStorage.saveCredentials(emailOrUserId, passwordOrPin, null);
-          Logger.log("[Auth] ✅ Immediate login persistence enabled via form (Email)");
+          Logger.trace('AUTH', 'auth-context.js', 'signIn', 'SUCCESS', 'Persistence enabled via form (Email)');
         }
 
         // Track manual login
@@ -925,7 +980,7 @@ export function AuthProvider({ children }) {
             await SecureStorage.saveCredentials(emailOrUserId, passwordOrPin, null);
           }
         }
-        Logger.log(`[Auth] ✅ Email Sign-In SUCCESS (${Date.now() - loginStartTime}ms)`);
+        Logger.trace('AUTH', 'auth-context.js', 'signIn', 'SUCCESS', `Email login: ${userCredential.user.uid.substring(0, 8)} (${Date.now() - loginStartTime}ms)`);
       }
     } catch (err) {
       // Record failure if it's a credentials error
@@ -934,8 +989,8 @@ export function AuthProvider({ children }) {
         await protector.recordFailure();
       }
 
-      Logger.error("Sign In Error:", err.code, err.message);
       const errorMessage = err?.message || "Sign in failed";
+      Logger.trace('AUTH', 'auth-context.js', 'signIn', 'FAILED', errorMessage);
       setError(errorMessage);
       throw new Error(errorMessage);
     }
@@ -949,22 +1004,32 @@ export function AuthProvider({ children }) {
 
       // Clear local cache FIRST to prevent race conditions on remount
       lastUserSession = null;
-      Logger.log("[Auth] 🏃 Starting Logout sequence...");
+      Logger.trace('AUTH', 'auth-context.js', 'logout', 'SUCCESS', 'Starting sequence');
+
+      // 0. Hard-Kill Presence Heartbeat immediately
+      if (presenceIntervalRef.current) {
+        clearInterval(presenceIntervalRef.current);
+        presenceIntervalRef.current = null;
+      }
 
       // 1. Attempt Server-Side Cleanup (Presence & Auth)
       try {
         if (user?.uid && auth.currentUser) {
           try {
+            // First, send an explicit 'offline' status via Sealed Presence if possible
+            const sharePresence = useThemeStore.getState().sharePresence;
+            await PresenceService.publishPresence(sharePresence, false).catch(() => { });
+
+            // Fallback: raw publicProfiles fields (unencrypted)
             const { updateUserPresence } = await import("../lib/firestore-service");
-            // Use silent=true to suppress "Permission Denied" errors if the session is flaky
-            await updateUserPresence(user.uid, false, true);
+            await updateUserPresence(user.uid, false, true).catch(() => { });
           } catch (e) {
             // Silent catch for presence update
           }
         }
         await signOut(auth);
       } catch (e) {
-        Logger.warn("[Auth] Server logout incomplete (network/permission issue):", e.message);
+        Logger.trace('AUTH', 'auth-context.js', 'logout', 'FAILED', `Server logout: ${e.message}`);
       }
 
       // 2. Local State Cleanup (Critical)
@@ -976,6 +1041,10 @@ export function AuthProvider({ children }) {
       setUser(null);
       // Force "Stealth Mode" (Calculator) on mobile so redirect goes to Calculator, not Login
       setIsDecoyMode(!isWeb, 'Logout');
+      if (isWeb && typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem('__INNERORBIT_SESSION_HINT');
+        setSessionHint(false);
+      }
       await AsyncStorage.removeItem("isAppUnlocked"); // RELOCK permanently
       await AsyncStorage.removeItem("has_active_session"); // Clear online status
 
@@ -986,14 +1055,13 @@ export function AuthProvider({ children }) {
           await SecureStorage.clearAllCredentials();
         }
       } catch (e) {
-        Logger.warn("[Auth] SecureStorage cleanup failed:", e.message);
+        Logger.trace('AUTH', 'auth-context.js', 'logout', 'FAILED', `SecureStorage: ${e.message}`);
       }
 
-      Logger.log('[Auth] ✅ Logged out successfully (Local state cleared)');
+      Logger.trace('AUTH', 'auth-context.js', 'logout', 'SUCCESS', 'Complete');
     } catch (err) {
-      // Fallback for any unexpected errors
-      Logger.error("Logout critical error:", err);
       const errorMessage = err?.message || "Logout failed";
+      Logger.trace('AUTH', 'auth-context.js', 'logout', 'FAILED', errorMessage);
       setError(errorMessage);
       setUser(null); // Force clear
     } finally {
@@ -1041,15 +1109,14 @@ export function AuthProvider({ children }) {
     const { email, googleCredential } = pendingGoogleLink;
 
     try {
-      Logger.log(`[Auth] 🔗 Linking Google to email account: ${email}`);
+      Logger.trace('AUTH', 'auth-context.js', 'linkGoogleToEmailAccount', 'SUCCESS', `Linking ${email}`);
 
       // 1. Sign in with email+password to get a valid Firebase user
-      const emailCredential = EmailAuthProvider.credential(email, password);
       const result = await signInWithEmailAndPassword(auth, email, password);
 
       // 2. Link Google provider to this account
       await linkWithCredential(result.user, googleCredential);
-      Logger.log('[Auth] ✅ Google provider linked successfully');
+      Logger.trace('AUTH', 'auth-context.js', 'linkGoogleToEmailAccount', 'SUCCESS', 'Linked successfully');
 
       // 3. Create/update Firestore profile (account already exists)
       await createUserProfile(result.user);
@@ -1059,7 +1126,7 @@ export function AuthProvider({ children }) {
 
       return result.user;
     } catch (err) {
-      Logger.error('[Auth] Link failed:', err.message);
+      Logger.trace('AUTH', 'auth-context.js', 'linkGoogleToEmailAccount', 'FAILED', err.message);
       throw err;
     }
   };
@@ -1100,6 +1167,7 @@ export function AuthProvider({ children }) {
       pendingGoogleLink,
       linkGoogleToEmailAccount,
       clearPendingGoogleLink,
+      hasSessionHint: sessionHint,
     }}>
       {children}
     </AuthContext.Provider>

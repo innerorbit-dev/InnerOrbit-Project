@@ -4,6 +4,7 @@ import { isWeb } from "../../utils/platform";
 import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GlobalHeader } from "../ui/GlobalHeader";
 import { getHomeStyles } from "../../styles/home.styles";
+import { LoadingDots } from "../ui/loading-dots";
 
 const ACCOUNT_IMG = require('../../assets/account.webp');
 
@@ -174,7 +175,14 @@ export const SettingsSidebar = ({
                                 <Image source={profile?.photoURL ? { uri: profile.photoURL } : ACCOUNT_IMG} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
                             </View>
                             <View style={{ flex: 1 }}>
-                                <Text style={{ color: THEME.primary, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>User ID: {profile?.myUserId || "..."}</Text>
+                                {['Loading...', 'Syncing...', 'Wait...', '...'].includes(profile?.myUserId) || !profile?.myUserId ? (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Text style={{ color: THEME.primary, fontSize: 18, fontWeight: '900', marginRight: 8 }}>User ID: </Text>
+                                        <LoadingDots color={THEME.primary} size={5} gap={3} />
+                                    </View>
+                                ) : (
+                                    <Text style={{ color: THEME.primary, fontSize: 18, fontWeight: '900' }} numberOfLines={1}>User ID: {profile.myUserId}</Text>
+                                )}
                                 <Text style={{ color: THEME.textSecondary, fontSize: 13, marginTop: 4 }} numberOfLines={1}>{user?.email}</Text>
                             </View>
                         </View>

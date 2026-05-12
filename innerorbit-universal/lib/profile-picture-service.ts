@@ -8,7 +8,7 @@ import {
     encryptSivBinary, 
     decryptSivBinary, 
     ENC_VERSION_QUANTUM_CHACHA,
-} from "./encryption-core";
+} from "./encryption";
 import { ml_kem768, createHash } from "./crypto-wrapper";
 import { Logger } from "./logger";
 import { IdentitySecurityService } from "./identity-security-service";

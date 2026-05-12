@@ -109,7 +109,7 @@ function generateRandomId() {
  */
 async function userIdExists(userId) {
   try {
-    const q = query(collection(db, "users"), where("userId", "==", userId));
+    const q = query(collection(db, "publicProfiles"), where("userId", "==", userId));
     const querySnapshot = await getDocs(q);
     return !querySnapshot.empty;
   } catch (error) {
@@ -179,7 +179,7 @@ export async function findUserById(userId) {
       return null;
     }
 
-    const q = query(collection(db, "users"), where("userId", "==", userId));
+    const q = query(collection(db, "publicProfiles"), where("userId", "==", userId));
     const querySnapshot = await getDocs(q);
 
     if (querySnapshot.empty) {
@@ -270,7 +270,9 @@ export function isValidPinFormat(pin) {
  * @returns The user document data or null if not found
  */
 export async function findUserByCredentials(userId, pin) {
+  Logger.trace('AUTH', 'user-id-generator.js', 'findUserByCredentials', 'PENDING', `userId=${userId}`);
   try {
+
     if (!isValidUserIdFormat(userId) || !isValidPinFormat(pin)) {
       return null;
     }

@@ -83,3 +83,32 @@ jest.mock('react-native-quick-crypto', () => {
         },
     };
 });
+
+jest.mock('expo-constants', () => ({
+    expoConfig: {
+        extra: {
+            firebaseApiKey: 'mock-api-key',
+            firebaseProjectId: 'mock-project-id',
+        },
+    },
+    manifest: {
+        extra: {
+            firebaseApiKey: 'mock-api-key',
+            firebaseProjectId: 'mock-project-id',
+        },
+    },
+}));
+
+jest.mock('expo-sqlite', () => ({
+    openDatabaseSync: jest.fn(() => ({
+        execAsync: jest.fn(() => Promise.resolve()),
+        runAsync: jest.fn(() => Promise.resolve({ lastInsertRowId: 1, changes: 1 })),
+        getFirstAsync: jest.fn(() => Promise.resolve(null)),
+        getAllAsync: jest.fn(() => Promise.resolve([])),
+        prepareAsync: jest.fn(() => Promise.resolve({
+            executeAsync: jest.fn(() => Promise.resolve({ lastInsertRowId: 1, changes: 1 })),
+            finalizeAsync: jest.fn(() => Promise.resolve()),
+        })),
+        withTransactionAsync: jest.fn((callback) => callback()),
+    })),
+}));

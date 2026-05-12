@@ -176,7 +176,7 @@ export const MobileSettingsOverlay = ({
       case 'connect':
         return <ConnectDetailView THEME={THEME} myUserId={profile.myUserId} user={user} showSuccess={showSuccess} isInline={true} />;
       case 'calls':
-        return <CallsDetailView THEME={THEME} />;
+        return <CallsDetailView THEME={THEME} isDesktop={false} />;
       case 'stories':
         return <StoriesDetailView THEME={THEME} />;
       case 'about':

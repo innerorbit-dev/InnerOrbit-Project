@@ -23,7 +23,22 @@ const Logger = {
         if (errorObj) {
             console.error(errorObj);
         }
-    }
+    },
+    trace: (module, file, fn, status, message = "") => {
+        const msg = message ? `: ${message}` : "";
+        const icon = status === 'SUCCESS' ? '✅' : (status === 'FAILED' ? '❌' : 'ℹ️');
+        console.log(`[${module}][${file}][${fn}] ${icon} ${status}${msg}`);
+    },
+    // Add self-reference
+    Logger: null
 };
 
+Logger.Logger = Logger;
+
+
 module.exports = { Logger };
+// Adding default for Babel/ESM interop
+module.exports.default = Logger;
+
+// Initialization check log
+console.log("[InnerOrbit][logger.js] 🚀 CommonJS Module loaded");

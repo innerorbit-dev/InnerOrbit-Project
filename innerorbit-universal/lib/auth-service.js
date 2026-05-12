@@ -15,14 +15,20 @@ import { useSensitiveString } from "./memory-hardening";
  * @returns Promise that resolves with the User Profile object
  */
 export async function signInWithPin(userId, pin) {
+  Logger.trace('AUTH', 'auth-service.js', 'signInWithPin', 'PENDING', `userId=${userId}`);
   return await useSensitiveString(pin, async (pinBuf) => {
     try {
+
       // 1. Verify Credentials using the buffer-converted string
       const userProfile = await findUserByCredentials(userId, pinBuf.toString());
 
       if (!userProfile) {
+        Logger.trace('AUTH', 'auth-service.js', 'signInWithPin', 'FAILED', 'Invalid credentials');
         throw new Error("Invalid User ID or PIN combination");
       }
+
+      Logger.trace('AUTH', 'auth-service.js', 'signInWithPin', 'SUCCESS', `uid=${userProfile.uid?.substring(0, 5)}...`);
+
 
       // 2. Initialize Session Presence (Mark as Online)
       try {
@@ -40,9 +46,11 @@ export async function signInWithPin(userId, pin) {
       return userProfile;
 
     } catch (error) {
+      Logger.trace('AUTH', 'auth-service.js', 'signInWithPin', 'FAILED', error?.message);
       Logger.error("PIN sign in error:", error);
       throw error;
     }
+
   });
 }
 
@@ -51,10 +59,12 @@ export async function signInWithPin(userId, pin) {
  * @param uid - The User UID
  */
 export function startSessionHeartbeat(uid) {
+  Logger.trace('AUTH', 'auth-service.js', 'startSessionHeartbeat', 'PENDING', `uid=${uid?.substring(0, 5)}...`);
   // Clear any existing interval to prevent duplicates
   if (globalThis.presenceInterval) {
     clearInterval(globalThis.presenceInterval);
   }
+
 
   Logger.log("[AuthService] ❤️ Starting Session Heartbeat...");
 
@@ -75,6 +85,8 @@ export function startSessionHeartbeat(uid) {
  * @param uid - The User UID (Optional, if known)
  */
 export async function signOutUser(uid) {
+  Logger.trace('AUTH', 'auth-service.js', 'signOutUser', 'PENDING', `uid=${uid?.substring(0, 5)}...`);
+
   // 1. Stop Heartbeat
   if (globalThis.presenceInterval) {
     clearInterval(globalThis.presenceInterval);
@@ -85,7 +97,9 @@ export async function signOutUser(uid) {
   if (uid) {
     try {
       await updateUserPresence(uid, false);
+      Logger.trace('AUTH', 'auth-service.js', 'signOutUser', 'SUCCESS');
       Logger.log("[AuthService] 🌑 User marked as Offline");
+
     } catch (e) {
       Logger.warn("[AuthService] Failed to set offline status:", e);
     }

@@ -33,15 +33,15 @@ import { Buffer } from "buffer";
 import { generateKeyPairSync, diffieHellman } from "./crypto-wrapper";
 import { initializeRatchet } from "./ratchet";
 import { getRatchetSession, saveRatchetSession, DEFAULT_ENCRYPTION_CAPABILITIES } from "./encryption";
-import { initializeV6Session, getV6Session } from "./encryption-v6";
 import { ml_kem768, ed25519Sign, createPublicKey, createPrivateKey } from "./crypto-wrapper";
 import { Logger } from "./logger";
 import { PresenceService } from "./presence-service";
+import { getV6Session, initializeV6Session } from "./encryption-v6";
 
 // ─── Storage Keys ──────────────────────────────────────────────────────────────
-const DH_PUBLIC_KEY_STORAGE  = "innerorbit_dh_pub";
+const DH_PUBLIC_KEY_STORAGE = "innerorbit_dh_pub";
 const DH_PRIVATE_KEY_STORAGE = "innerorbit_dh_priv";
-const PQC_PUBLIC_KEY_STORAGE  = "innerorbit_pqc_pub";
+const PQC_PUBLIC_KEY_STORAGE = "innerorbit_pqc_pub";
 const PQC_PRIVATE_KEY_STORAGE = "innerorbit_pqc_priv";
 const IDENTITY_PUBLIC_KEY_STORAGE = "innerorbit_identity_pub";
 const IDENTITY_PRIVATE_KEY_STORAGE = "innerorbit_identity_priv";
@@ -54,15 +54,15 @@ async function getFirestoreFns() {
   const svc = mod.default || mod;
 
   if (!svc.getUserProfile) {
-     Logger.warn("[RatchetKeyService] ⚠️ getUserProfile missing from imported module. Retrying extraction...");
+    Logger.warn("[RatchetKeyService] ⚠️ getUserProfile missing from imported module. Retrying extraction...");
   }
 
   return {
     publishDhPublicKey: (svc.publishDhPublicKey || svc.default?.publishDhPublicKey) as (uid: string, b64: string) => Promise<void>,
-    fetchDhPublicKey:   (svc.fetchDhPublicKey || svc.default?.fetchDhPublicKey)   as (uid: string) => Promise<string | null>,
+    fetchDhPublicKey: (svc.fetchDhPublicKey || svc.default?.fetchDhPublicKey) as (uid: string) => Promise<string | null>,
     publishV6PublicKeys: (svc.publishV6PublicKeys || svc.default?.publishV6PublicKeys) as (uid: string, dh: string, pqc: string, identity: string, signature: string) => Promise<void>,
-    fetchV6PublicKeys:   (svc.fetchV6PublicKeys || svc.default?.fetchV6PublicKeys)   as (uid: string) => Promise<{dh: string, pqc: string, identity?: string, signature?: string} | null>,
-    getUserProfile:      (svc.getUserProfile || svc.default?.getUserProfile)      as (uid: string) => Promise<any>,
+    fetchV6PublicKeys: (svc.fetchV6PublicKeys || svc.default?.fetchV6PublicKeys) as (uid: string) => Promise<{ dh: string, pqc: string, identity?: string, signature?: string } | null>,
+    getUserProfile: (svc.getUserProfile || svc.default?.getUserProfile) as (uid: string) => Promise<any>,
   };
 }
 
@@ -90,22 +90,22 @@ export async function getOrCreateMyDhKeyPair(): Promise<{
   publicKey: Buffer;
   privateKey: Buffer;
 }> {
-  const storedPub  = await AsyncStorage.getItem(DH_PUBLIC_KEY_STORAGE);
+  const storedPub = await AsyncStorage.getItem(DH_PUBLIC_KEY_STORAGE);
   const storedPriv = await AsyncStorage.getItem(DH_PRIVATE_KEY_STORAGE);
 
   if (storedPub && storedPriv) {
     return {
-      publicKey:  Buffer.from(storedPub,  "base64"),
+      publicKey: Buffer.from(storedPub, "base64"),
       privateKey: Buffer.from(storedPriv, "base64"),
     };
   }
 
   // Generate fresh X25519 key pair (Noble natively returns raw 32 bytes)
   const kp = generateKeyPairSync("x25519");
-  const publicKey  = Buffer.from(kp.publicKey as any);
+  const publicKey = Buffer.from(kp.publicKey as any);
   const privateKey = Buffer.from(kp.privateKey as any);
 
-  await AsyncStorage.setItem(DH_PUBLIC_KEY_STORAGE,  publicKey.toString("base64"));
+  await AsyncStorage.setItem(DH_PUBLIC_KEY_STORAGE, publicKey.toString("base64"));
   await AsyncStorage.setItem(DH_PRIVATE_KEY_STORAGE, privateKey.toString("base64"));
 
   Logger.log("[RatchetKeyService] ✅ Generated new X25519 DH key pair");
@@ -120,7 +120,7 @@ export async function getOrCreateMyPqcKeyPair(): Promise<{
   publicKey: Uint8Array;
   secretKey: Uint8Array;
 }> {
-  const storedPub  = await AsyncStorage.getItem(PQC_PUBLIC_KEY_STORAGE);
+  const storedPub = await AsyncStorage.getItem(PQC_PUBLIC_KEY_STORAGE);
   const storedPriv = await AsyncStorage.getItem(PQC_PRIVATE_KEY_STORAGE);
 
   if (storedPub && storedPriv) {
@@ -132,7 +132,7 @@ export async function getOrCreateMyPqcKeyPair(): Promise<{
 
   // Generate fresh ML-KEM-768 key pair
   const kp = ml_kem768.keygen();
-  const publicKey  = kp.publicKey;
+  const publicKey = kp.publicKey;
   const secretKey = kp.secretKey;
 
   await AsyncStorage.setItem(PQC_PUBLIC_KEY_STORAGE, Buffer.from(publicKey).toString("base64"));
@@ -150,7 +150,7 @@ export async function getOrCreateMyIdentityKeyPair(): Promise<{
   publicKey: Buffer;
   privateKey: Buffer;
 }> {
-  const storedPub  = await AsyncStorage.getItem(IDENTITY_PUBLIC_KEY_STORAGE);
+  const storedPub = await AsyncStorage.getItem(IDENTITY_PUBLIC_KEY_STORAGE);
   const storedPriv = await AsyncStorage.getItem(IDENTITY_PRIVATE_KEY_STORAGE);
 
   if (storedPub && storedPriv) {
@@ -162,7 +162,7 @@ export async function getOrCreateMyIdentityKeyPair(): Promise<{
 
   // Generate fresh Ed25519 Identity key pair
   const kp = ed25519Sign.keygen();
-  const publicKey  = kp.publicKey;
+  const publicKey = kp.publicKey;
   const privateKey = kp.privateKey;
 
   await AsyncStorage.setItem(IDENTITY_PUBLIC_KEY_STORAGE, publicKey.toString("base64"));
@@ -183,11 +183,13 @@ export async function getOrCreateMyIdentityKeyPair(): Promise<{
  * @param uid - Firebase Auth UID of the current user
  */
 export async function publishMyKeysOnLogin(uid: string): Promise<void> {
+  Logger.trace('RATCHET-KEY', 'ratchet-key-service.ts', 'publishMyKeysOnLogin', 'PENDING', `uid=${uid?.substring(0, 5)}...`);
   try {
+
     // 1. Classic v4 DH
     const { publicKey: dhPub } = await getOrCreateMyDhKeyPair();
     const { publishDhPublicKey, publishV6PublicKeys, getUserProfile } = await getFirestoreFns();
-    
+
     // Check if we need to restore keys (Fresh install)
     const storedIdentity = await AsyncStorage.getItem(IDENTITY_PUBLIC_KEY_STORAGE);
     if (!storedIdentity) {
@@ -199,39 +201,39 @@ export async function publishMyKeysOnLogin(uid: string): Promise<void> {
         if (restored) {
           Logger.log("[RatchetKeyService] ✅ Identity restored from cloud backup.");
           // Reload keys after restoration
-          return publishMyKeysOnLogin(uid); 
+          return publishMyKeysOnLogin(uid);
         }
       }
     }
 
     await publishDhPublicKey(uid, dhPub.toString("base64"));
-    
+
     // 2. Quantum v6 (DH + ML-KEM) - Gated by Architectural Hold
     if (DEFAULT_ENCRYPTION_CAPABILITIES.v6) {
       const { publicKey: pqcPub } = await getOrCreateMyPqcKeyPair();
 
       // 3. Ed25519 Identity & Capability Signing
       const { publicKey: identityPub, privateKey: identityPriv } = await getOrCreateMyIdentityKeyPair();
-      
+
       // 4. Automatic Backup (if missing in cloud but present locally)
       const profile = await getUserProfile(uid);
       if (profile && profile.pin) {
-         const { backupAccountIdentity } = await import("./key-backup-service");
-         const { publicKey: dhPub, privateKey: dhPriv } = await getOrCreateMyDhKeyPair();
-         const { publicKey: pqcPub, secretKey: pqcPriv } = await getOrCreateMyPqcKeyPair();
-         
-         await backupAccountIdentity(uid, profile.pin, {
-           dh: { pub: dhPub.toString("base64"), priv: dhPriv.toString("base64") },
-           pqc: { pub: Buffer.from(pqcPub).toString("base64"), priv: Buffer.from(pqcPriv).toString("base64") },
-           identity: { pub: identityPub.toString("base64"), priv: identityPriv.toString("base64") }
-         });
+        const { backupAccountIdentity } = await import("./key-backup-service");
+        const { publicKey: dhPub, privateKey: dhPriv } = await getOrCreateMyDhKeyPair();
+        const { publicKey: pqcPub, secretKey: pqcPriv } = await getOrCreateMyPqcKeyPair();
+
+        await backupAccountIdentity(uid, profile.pin, {
+          dh: { pub: dhPub.toString("base64"), priv: dhPriv.toString("base64") },
+          pqc: { pub: Buffer.from(pqcPub).toString("base64"), priv: Buffer.from(pqcPriv).toString("base64") },
+          identity: { pub: identityPub.toString("base64"), priv: identityPriv.toString("base64") }
+        });
       }
 
       // We cryptographically bind the v6 capability and public keys together.
       const dhB64 = dhPub.toString("base64");
       const pqcB64 = Buffer.from(pqcPub).toString("base64");
       const identityB64 = identityPub.toString("base64");
-      
+
       const capabilityPayload = `v6:true|dh:${dhB64}|pqc:${pqcB64}`;
       const signatureBuffer = ed25519Sign.sign(capabilityPayload, identityPriv);
       const signatureB64 = signatureBuffer.toString("base64");
@@ -242,8 +244,10 @@ export async function publishMyKeysOnLogin(uid: string): Promise<void> {
     Logger.log(`[RatchetKeyService] ✅ All security keys published for ${uid.substring(0, 5)}...`);
   } catch (e: any) {
     // Non-fatal — falls back to legacy send on failure
+    Logger.trace('RATCHET-KEY', 'ratchet-key-service.ts', 'publishMyKeysOnLogin', 'FAILED', e?.message);
     Logger.warn(`[RatchetKeyService] ⚠️ Failed to publish keys: ${e?.message}`);
   }
+
 }
 
 // ─── Chat Open Hook ────────────────────────────────────────────────────────────
@@ -273,6 +277,8 @@ export async function initializeRatchetIfNeeded(
   myUid: string,
   partnerUid: string
 ): Promise<boolean> {
+  Logger.trace('RATCHET-KEY', 'ratchet-key-service.ts', 'initializeRatchetIfNeeded', 'PENDING', `conv=${conversationId?.substring(0, 5)}...`);
+
   // ── Gated by Architectural Hold ──
   if (!DEFAULT_ENCRYPTION_CAPABILITIES.v4) return false;
 
@@ -280,6 +286,8 @@ export async function initializeRatchetIfNeeded(
     // ── Already initialized? Don't overwrite existing state ──
     const existing = await getRatchetSession(conversationId);
     if (existing) {
+      // 🛡️ SELF-HEAL: Ensure the stable profile key is shared even if session exists
+      PresenceService.shareProfileKeyWithPartner(conversationId, [myUid, partnerUid]).catch(() => { });
       Logger.log(`[RatchetKeyService] Session already exists for ${conversationId.substring(0, 8)}...`);
       return true;
     }
@@ -331,15 +339,17 @@ export async function initializeRatchetIfNeeded(
     // ── Persist the session (encrypted with device key on mobile, AsyncStorage on web) ──
     await saveRatchetSession(conversationId, state);
 
-    // 🛡️ SEAMLESS PRESENCE: Share Profile Key encrypted with this shared secret
-    PresenceService.shareProfileKeyWithPartner(conversationId, sharedSecret.toString("hex")).catch(() => {});
+    // 🛡️ SEAMLESS PRESENCE: Share Profile Key encrypted with a stable identity-linked secret
+    PresenceService.shareProfileKeyWithPartner(conversationId, [myUid, partnerUid]).catch(() => { });
 
     Logger.log(`[RatchetKeyService] ✅ v4 Ratchet session ready for ${conversationId.substring(0, 8)}...`);
     return true;
   } catch (e: any) {
+    Logger.trace('RATCHET-KEY', 'ratchet-key-service.ts', 'initializeRatchetIfNeeded', 'FAILED', e?.message);
     Logger.error(`[RatchetKeyService] ❌ Failed to initialize ratchet: ${e?.message}`);
     return false;
   }
+
 }
 
 /**
@@ -355,13 +365,19 @@ export async function initializeV6IfNeeded(
   myUid: string,
   partnerUid: string
 ): Promise<boolean> {
+  Logger.trace('RATCHET-KEY', 'ratchet-key-service.ts', 'initializeV6IfNeeded', 'PENDING', `conv=${conversationId?.substring(0, 5)}...`);
+
   // ── Gated by Architectural Hold ──
   if (!DEFAULT_ENCRYPTION_CAPABILITIES.v6) return false;
 
   try {
-    // ── Already initialized? ──
+    // ── Session already exists? ──
     const existing = await getV6Session(conversationId);
-    if (existing) return true;
+    if (existing) {
+      // 🛡️ SELF-HEAL: Ensure the stable profile key is shared even if session exists
+      PresenceService.shareProfileKeyWithPartner(conversationId, [myUid, partnerUid]).catch(() => { });
+      return true;
+    }
 
     // ── Fetch partner's v6 public keys ──
     const { fetchV6PublicKeys } = await getFirestoreFns();
@@ -423,15 +439,17 @@ export async function initializeV6IfNeeded(
       ownPqcKeyPair: { publicKey: myPqcPub, secretKey: myPqcPriv }
     });
 
-    // 🛡️ SEAMLESS PRESENCE: Share Profile Key encrypted with this shared secret
-    PresenceService.shareProfileKeyWithPartner(conversationId, sharedSecret.toString("hex")).catch(() => {});
+    // 🛡️ SEAMLESS PRESENCE: Share Profile Key encrypted with a stable identity-linked secret
+    PresenceService.shareProfileKeyWithPartner(conversationId, [myUid, partnerUid]).catch(() => { });
 
     Logger.log(`[RatchetKeyService] ✅ v6 PQXDH session ready for ${conversationId.substring(0, 8)}...`);
     return true;
   } catch (e: any) {
+    Logger.trace('RATCHET-KEY', 'ratchet-key-service.ts', 'initializeV6IfNeeded', 'FAILED', e?.message);
     Logger.error(`[RatchetKeyService] ❌ Failed to initialize v6: ${e?.message}`);
     return false;
   }
+
 }
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
@@ -457,7 +475,7 @@ export async function getConversationSharedSecret(partnerUid: string): Promise<B
 
     const { privateKey: myPrivateKey } = await getOrCreateMyDhKeyPair();
     const partnerPublicKey = Buffer.from(partnerPubB64, "base64");
-    
+
     return await tryDiffieHellman(myPrivateKey, partnerPublicKey);
   } catch (e) {
     Logger.error("[RatchetKeyService] Failed to get shared secret", e);

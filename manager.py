@@ -1,4 +1,71 @@
-# Project Role: Core entry point for developers to manage the entire ecosystem.
+"""
+INNERORBIT AUTOMATION HUB (manager.py)
+======================================
+Centralized command center for the InnerOrbit ecosystem.
+Provides automated workflows for Android, Web, Desktop, and Cloud Deployment.
+
+USAGE:
+  python manager.py <command>
+  orbit <command> (if registered globally)
+
+AVAILABLE COMMANDS:
+-------------------
+  debug     : Build Android Debug APK
+  release   : Build Android Release APK (v5.5+ cascading encryption ready)
+  android   : Build both Debug & Release APKs
+  clean     : Wipe Gradle cache and build folders
+  fresh     : Full Android refresh (Clean -> Build Both)
+  install   : Deploy the latest Debug APK to a connected ADB device
+  phys      : Physical Device Workflow (Build Debug -> Auto-Install)
+  dev       : Physical Full Flow (Build -> Install -> Start Expo Server)
+  
+  start     : Launch Expo Development Server (Metro)
+  portal    : Launch Vite-based React Download Portal (Port 5173)
+  download  : Launch Legacy Download Portal (Port 5679)
+  both      : Simultaneous launch of React & Legacy Portals
+  electron  : Launch Desktop environment in Dev Mode (links to localhost:8081)
+  
+  desktop   : Package production Windows EXE
+  web       : Package production Web distribution (dist/)
+  mac       : Package production macOS DMG
+  linux     : Package production Linux AppImage
+  all       : ULTIMATE RELEASE (Android + Desktop + Web + Firebase)
+
+  firebase  : Full Cloud Deployment (Hosting, Functions, Rules)
+  rules     : Deploy Firestore Security Rules ONLY
+  git       : Interactive Git Menu (Sync, Status, Branching)
+  health    : Project integrity audit (Env, Deps, Manifests)
+  cleanup   : Remove production 'release/' artifacts
+  
+  gui       : Launch Premium Flask Dashboard (http://localhost:2004)
+  setup     : Launch visual Setup Wizard for new environments
+  browser   : Configure preferred browser/incognito mode
+  reset     : Clear terminal and browser preferences
+  register  : Set up 'orbit' as a global command in User PATH
+  exit      : Terminate the Hub session
+
+COMMON WORKFLOWS:
+-----------------
+1. Physical Debugging: `orbit dev`
+   - Builds APK, pushes to phone via ADB, and starts the Metro bundler.
+2. Production Release: `orbit all`
+   - Runs full multi-platform build chain and prompts for Firebase deployment.
+3. Rapid UI/UX Test: `orbit both`
+   - Spins up both portals to verify cross-platform portal consistency.
+
+DEBUG SHORTCUTS:
+----------------
+- Press 'K' in the Hub menu for Kernel Access (Direct Admin Shell).
+- Run `orbit health` if Firestore or Auth calls fail (checks .env).
+- Use `orbit electron` to test desktop-specific features like "Calc Mode".
+
+AUTOMATION SYSTEM:
+------------------
+- Self-Bootstrapping: Auto-creates and activates .venv.
+- Admin Elevation: Triggers UAC/Sudo prompts when needed.
+- Browser Sync: Automatically pushes .env vars to the portal config.
+"""
+
 
 VERSION = "5.0"
 
@@ -10,8 +77,24 @@ import argparse
 import time
 import socket
 import json
+import io
 from datetime import datetime
 import re
+
+# --- ENCODING FIX (Windows) ---
+# Ensures Unicode characters (like splash blocks) don't crash legacy terminals
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except:
+    # Final fallback for unusual environments
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except:
+        pass
 
 # ── ANSI colours (work on Windows 10+ / PowerShell / any modern terminal) ──
 class C:
@@ -78,7 +161,7 @@ if __name__ == "__main__":
     if "SKIP_VENV_BOOTSTRAP" not in os.environ:
         # Starting delay requested by user
         print("\n  [*] Warming up InnerOrbit Console...")
-        time.sleep(1.5)
+        time.sleep(2.5)
         bootstrap_venv()
 
 def main():
@@ -112,8 +195,15 @@ if os.name == "nt":
     set_terminal_mode(False)
 
 def _type(text, delay=0):
-    """Instant text output for menu stability."""
-    print(text)
+    """Typing effect for text output."""
+    if delay > 0:
+        for char in text:
+            sys.stdout.write(char)
+            sys.stdout.flush()
+            time.sleep(delay)
+        sys.stdout.write('\n')
+    else:
+        print(text)
 
 def flush_input():
     """Aggressively clears the terminal input buffer."""
@@ -157,8 +247,15 @@ def get_key():
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch.lower()
 
-def show_splash():
+def show_splash(restarted=False):
     os.system('cls' if os.name == 'nt' else 'clear')
+    
+    if restarted:
+        print(f"{C.CYAN}{'=' * 62}{C.RST}")
+        print(f"  {C.BOLD}INNERORBIT PROJECT HUB{C.RST} {C.GRAY}│ v{VERSION}{C.RST} {C.GRN}(QUICK RELOAD){C.RST}")
+        print(f"{C.CYAN}{'=' * 62}{C.RST}\n")
+        return
+
     logo = [
         f"{C.BLUE}{C.BOLD}  ██╗███╗  ██╗███╗  ██╗███████╗██████╗  {C.PURP} ██████╗ ██████╗ ██████╗ ██╗████████╗{C.RST}",
         f"{C.BLUE}{C.BOLD}  ██║████╗ ██║████╗ ██║██╔════╝██╔══██╗ {C.PURP}██╔═══██╗██╔══██╗██╔══██╗██║╚══██╔══╝{C.RST}",
@@ -169,13 +266,14 @@ def show_splash():
     ]
     for line in logo:
         print(line)
+        time.sleep(0.08) # Slower scanning effect
 
     print()
-    _type(f"  {C.GRAY}Project Console  ·  v{VERSION}  ·  InnerOrbit Dev Tools{C.RST}", delay=0.012)
+    _type(f"  {C.GRAY}Project Console  ·  v{VERSION}  ·  InnerOrbit Dev Tools{C.RST}", delay=0.03)
     print(f"  {C.GRAY}{'─' * 62}{C.RST}")
-    time.sleep(0.3)
-    _type(f"  {C.GRN}●{C.RST}  Environment ready", delay=0.015)
-    _type(f"  {C.BLUE}●{C.RST}  All modules loaded", delay=0.015)
+    time.sleep(1.2) # Increased transition delay
+    _type(f"  {C.GRN}●{C.RST}  Environment ready", delay=0.04)
+    _type(f"  {C.BLUE}●{C.RST}  All modules loaded", delay=0.04)
     print()
 
 def self_upgrade_version():
@@ -1011,27 +1109,72 @@ def git_ops_menu():
     input(f"\n  {C.GRAY}Press Enter to continue...{C.RST}")
 
 def install_on_device():
-    print("\n--- [INSTALL ON PHYSICAL DEVICE] ---")
+    print(f"\n  {C.BLUE}{C.BOLD}--- [ADB DEVICE DEPLOYMENT] ---{C.RST}")
     apk_path = os.path.join(ANDROID_DIR, "app", "build", "outputs", "apk", "debug", "app-debug.apk")
+    package_name = "com.innerorbit.calcx"
     
     if not os.path.exists(apk_path):
-        print(f"Error: Debug APK not found at {apk_path}. Please build it first (Option 1).")
+        print(f"  {C.RED}✘ Error:{C.RST} Debug APK not found at {apk_path}")
+        print(f"  {C.GRAY}Please run 'Build Debug APK' first.{C.RST}")
         return False
     
-    print("Checking for connected devices...")
-    devices_output = subprocess.check_output(["adb", "devices"], text=True)
-    if "unauthorized" in devices_output:
-        print("Error: Device detected but UNAUTHORIZED. Please check your phone and tap 'Allow' on the USB debugging prompt.")
+    print(f"  {C.CYAN}[*] Scanning for connected devices...{C.RST}")
+    try:
+        devices_output = subprocess.check_output(["adb", "devices"], text=True)
+        
+        if "unauthorized" in devices_output:
+            print(f"\n  {C.RED}{C.BOLD}⚠ DEVICE UNAUTHORIZED{C.RST}")
+            print(f"  {C.WHT}Please check your physical device and tap 'Allow USB Debugging'.{C.RST}")
+            return False
+            
+        if "device\n" not in devices_output and "device\r\n" not in devices_output:
+            print(f"\n  {C.RED}{C.BOLD}⚠ NO DEVICE DETECTED{C.RST}")
+            print(f"  {C.GRAY}Ensure your device is connected via USB and 'USB Debugging' is enabled.{C.RST}")
+            return False
+
+        # Check if already installed
+        print(f"  {C.CYAN}[*] Checking application state...{C.RST}")
+        check_install = subprocess.run(["adb", "shell", "pm", "list", "packages", package_name], capture_output=True, text=True)
+        
+        if package_name in check_install.stdout:
+            print(f"  {C.YEL}● Existing installation found. Performing upgrade...{C.RST}")
+        else:
+            print(f"  {C.GRN}● No existing installation found. Performing fresh install...{C.RST}")
+
+        rc = run_command(["adb", "install", "-r", apk_path], PROJECT_ROOT, "Deploying APK")
+        
+        if rc == 0:
+            print(f"\n  {C.GRN}{C.BOLD}✔ SUCCESS: App deployed to physical device.{C.RST}")
+            return True
+        else:
+            print(f"\n  {C.RED}{C.BOLD}✘ FAILED: ADB installation failed.{C.RST}")
+            return False
+            
+    except FileNotFoundError:
+        print(f"  {C.RED}✘ Error:{C.RST} ADB command not found. Is Android SDK platform-tools in your PATH?")
         return False
-    if "device\n" not in devices_output and "device\r\n" not in devices_output:
-        print("Error: No physical device detected via ADB. Please connect your device and enable USB debugging.")
+    except Exception as e:
+        print(f"  {C.RED}✘ Error during ADB operation: {e}{C.RST}")
         return False
 
-    rc = run_command(["adb", "install", "-r", apk_path], PROJECT_ROOT, "Installing Debug APK to device")
-    if rc == 0:
-        print("\n[SUCCESS] App installed on device.")
-        return True
-    return False
+def debug_physical_device_workflow():
+    """Combined build and install flow for physical devices."""
+    print(f"\n  {C.PURP}{C.BOLD}============================================={C.RST}")
+    print(f"  {C.PURP}{C.BOLD}       PHYSICAL DEVICE DEBUG WORKFLOW        {C.RST}")
+    print(f"  {C.PURP}{C.BOLD}============================================={C.RST}\n")
+    
+    if not build_android_debug():
+        print(f"\n  {C.RED}✘ Build Failed. Deployment aborted.{C.RST}")
+        return False
+        
+    time.sleep(1) # Pacing
+    
+    if not install_on_device():
+        print(f"\n  {C.RED}✘ Installation Failed.{C.RST}")
+        return False
+        
+    print(f"\n  {C.GRN}{C.BOLD}✔ Workflow Complete! You can now run the app on your device.{C.RST}")
+    return True
 
 def start_dev_server():
     print("\n--- [START EXPO DEV SERVER] ---")
@@ -1255,12 +1398,97 @@ def register_globally():
     except Exception as e:
         print(f"  {C.RED}✘ Error during registration: {e}{C.RST}")
 
+def show_help_shortcuts():
+    """Displays all available CLI shortcuts for the 'orbit' command."""
+    clear_terminal()
+    print(f"\n  {C.BLUE}{C.BOLD}INNERORBIT CLI SHORTCUTS{C.RST}")
+    print(f"  {C.GRAY}{'─' * 45}{C.RST}")
+    print(f"  {C.CYAN}Usage:{C.RST} orbit <shortcut>")
+    print()
+    
+    shortcuts = [
+        ("debug", "Build Android Debug APK"),
+        ("release", "Build Android Release APK"),
+        ("android", "Build Both Android APKs"),
+        ("clean", "Clean Android Project"),
+        ("fresh", "Fresh Android Build (Clean + Both)"),
+        ("install", "Install Debug APK to Device"),
+        ("phys", "Physical Device Debug (Build + Install)"),
+        ("start", "Start Expo Dev Server"),
+        ("portal", "Start React Portal (Vite)"),
+        ("download", "Start Legacy Download Portal"),
+        ("both", "Start Both Portals"),
+        ("dev", "Physical Device Flow (Build + Install + Start)"),
+        ("desktop", "Build Windows EXE"),
+        ("web", "Build Web Application"),
+        ("electron", "Launch Electron (Dev Mode)"),
+        ("firebase", "Deploy to Firebase"),
+        ("rules", "Deploy Firestore Rules Only"),
+        ("git", "Git Operations Menu"),
+        ("health", "Project Health Check"),
+        ("cleanup", "Cleanup Release Folder"),
+        ("gui", "Launch Premium GUI Console"),
+        ("setup", "Launch Setup Wizard"),
+        ("browser", "Select Preferred Browser"),
+        ("reset", "Reset Terminal Choice"),
+        ("register", "Register Manager Globally (orbit command)"),
+        ("exit", "Terminate InnerOrbit Manager"),
+        ("all", "Ultimate Project Release (Full Chain)")
+    ]
+    
+    for cmd, desc in shortcuts:
+        print(f"  {C.WHT}{cmd:<12}{C.RST}  {C.GRAY}→{C.RST}  {desc}")
+    
+    print(f"\n  {C.GRAY}{'─' * 45}{C.RST}")
+    print(f"  {C.YEL}Press ENTER to restart or [Q] to Quit...{C.RST}")
+    
+    while True:
+        choice = get_key()
+        if choice == 'q':
+            print(f"\n  {C.RED}[*] Exiting InnerOrbit Manager...{C.RST}")
+            time.sleep(0.2)
+            sys.exit(0)
+        elif choice in ['\r', '\n']:
+            break
+        # Ignore other keys to prevent accidental trigger
+    
+    print(f"  {C.CYAN}[*] Rebooting InnerOrbit Hub...{C.RST}")
+    time.sleep(0.5)
+    # Pass --restarted flag to skip animations on reload
+    os.execv(sys.executable, [sys.executable] + sys.argv + ["--restarted"])
+
 def main():
     flush_input()
+    
+    # Persistent launch tracking to detect recent restarts even after exit
+    last_launch_file = os.path.join("tools", ".last_launch")
+    recent_launch = False
+    now = time.time()
+    
+    if os.path.exists(last_launch_file):
+        try:
+            with open(last_launch_file, "r") as f:
+                last_time = float(f.read().strip())
+                # If started again within 5 minutes, treat as a quick reload
+                if now - last_time < 300:
+                    recent_launch = True
+        except:
+            pass
+    
+    try:
+        with open(last_launch_file, "w") as f:
+            f.write(str(now))
+    except:
+        pass
+
     parser = argparse.ArgumentParser(description="InnerOrbit Project Manager")
     parser.add_argument("task", nargs="?", help="Task to run")
+    parser.add_argument("--restarted", action="store_true", help="Skip animations on restart")
     args = parser.parse_args()
 
+    # Quick boot if flag is passed OR if we detected a recent manual launch
+    is_restarted = args.restarted or recent_launch
+    
     if args.task:
         task = args.task.lower()
         # (Task mapping remains same for CLI consistency)
@@ -1270,6 +1498,7 @@ def main():
         elif task == "clean": clean_android()
         elif task == "fresh": fresh_build_android()
         elif task == "install": install_on_device()
+        elif task == "phys": debug_physical_device_workflow()
         elif task == "start": start_dev_server()
         elif task == "react": start_dev_server()
         elif task == "portal": start_react_portal_server()
@@ -1289,11 +1518,16 @@ def main():
         elif task == "browser": set_preferred_browser()
         elif task == "reset": reset_terminal_choice()
         elif task == "register": register_globally()
+        elif task == "exit": sys.exit(0)
+        elif task in ["help", "h"]: show_help_shortcuts()
         elif task == "all": full_release()
         sys.exit(0)
 
     # --- INTERACTIVE HUB SYSTEM ---
-    show_splash()
+    if not is_restarted:
+        time.sleep(0.5) # Smooth transition
+    
+    show_splash(restarted=is_restarted)
     ask_terminal()
     
     current_cat = "HUB"
@@ -1325,6 +1559,7 @@ def main():
                 print(f"\n  {C.BLUE}[G]{C.RST}  {C.BOLD}LAUNCH GUI CONSOLE{C.RST} {C.GRAY}(Premium Flask Interface){C.RST}")
                 print(f"  {C.CYAN}[R]{C.RST}  {C.WHT}Restart Manager{C.RST}")
                 print(f"  {C.RED}[Q]{C.RST}  {C.WHT}Quit Manager{C.RST}")
+                print(f"  {C.YEL}[H]{C.RST}  {C.WHT}Help / Shortcuts{C.RST}")
                 
                 print(f"\n  {C.BOLD}Hub >{C.RST} ", end='', flush=True)
                 choice = get_key()
@@ -1338,12 +1573,14 @@ def main():
                 elif choice == 'k': launch_system_shell()
                 elif choice == 'e': elevate_privileges()
                 elif choice == 'g': launch_gui()
+                elif choice == 'h': show_help_shortcuts()
                 elif choice == 'r':
                     print(f"\n  {C.CYAN}[*] Shutting down services...{C.RST}")
                     time.sleep(0.8)
                     print(f"  {C.CYAN}[*] Rebooting InnerOrbit Hub...{C.RST}")
                     time.sleep(0.7)
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                    # Pass --restarted flag to skip animations on reload
+                    os.execv(sys.executable, [sys.executable] + sys.argv + ["--restarted"])
                 elif choice == 'q': break
                 continue
 
@@ -1355,6 +1592,7 @@ def main():
                 print(f"  4. Clean Project")
                 print(f"  5. Fresh Build (Clean + Both)")
                 print(f"  6. Install Debug APK to Device")
+                print(f"  7. {C.CYAN}Physical Device Debug{C.RST} (Build + Auto-Install)")
                 print(f"\n  [B] Back to Hub")
                 
                 print(f"\n  {C.BOLD}Android >{C.RST} ", end='', flush=True)
@@ -1366,6 +1604,7 @@ def main():
                 elif c == '4': clean_android()
                 elif c == '5': fresh_build_android()
                 elif c == '6': install_on_device()
+                elif c == '7': debug_physical_device_workflow()
                 
                 if c: 
                     set_terminal_mode(True)

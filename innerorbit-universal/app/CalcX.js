@@ -13,6 +13,7 @@ import CalculatorComponent from "../components/Calculator";
 import FabMenuOptions from "../components/ui/FabMenu";
 
 import { useAppTheme } from "../store/themeStore";
+import { LoadingDots } from "../components/ui/loading-dots";
 import { useUpdates } from "../hooks/useUpdates";
 import UpdateWalkthrough from "../components/update-walkthrough";
 import { ErrorBoundary as LocalErrorBoundary } from '../components/error-boundary';
@@ -128,7 +129,7 @@ function MobileGames({ onSwitchMode }) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: THEME.bg }}>
         <StatusBar style={isDark ? "light" : "dark"} />
-        <ActivityIndicator size="large" color={THEME.btnOp[0]} />
+        <LoadingDots color={THEME.btnOp[0]} size={8} gap={4} />
       </View>
     );
   }

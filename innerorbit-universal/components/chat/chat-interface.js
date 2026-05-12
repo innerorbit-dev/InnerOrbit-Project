@@ -1,6 +1,7 @@
 /** Purpose: Main chat interface including message list, input area, and real-time updates. */
 import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { View, Text, FlatList, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, StyleSheet, Alert, Clipboard, Image, Modal, Keyboard, Animated } from "react-native";
+import { Buffer } from "buffer";
 import { isWeb, select } from "../../utils/platform";
 import { useAuth } from "../../context/auth-context";
 import { subscribeToMessages, sendMessage, getUserProfile, deleteConversation, updateMessage, deleteMessageForEveryone, deleteMessageForMe, markMessageAsRead, toggleMessageReaction, uploadChatImage, clearChatData, clearChatForMe, resetUnreadCount, updateConversationStealthMode, fetchV6PublicKeys } from "../../lib/firestore-service";
@@ -20,7 +21,8 @@ import {
     generateSafetyNumber,
     isEncrypted,
     resolveSendVersion,
-    getRatchetSession
+    getRatchetSession,
+    getV6Session
 } from "../../lib/encryption";
 import { hasKeyBackup, backupRatchetSession } from "../../lib/key-backup-service";
 import { MediaVaultService } from "../../lib/media-vault-service";
@@ -493,7 +495,7 @@ export function ChatInterface({
                     const participantIds = convData.participantIds || [];
 
                     // Set clearedAt timestamp for filtering
-                    const userClearedAt = convData[`clearedAt_${user.uid}`]?.toMillis() || 0;
+                    const userClearedAt = convData[`clearedAt_${user.uid}`]?.toMillis ? convData[`clearedAt_${user.uid}`].toMillis() : (convData[`clearedAt_${user.uid}`] || 0);
                     setClearedAt(userClearedAt);
 
                     // Derive shared encryption key for this conversation
@@ -583,54 +585,73 @@ export function ChatInterface({
         }
     }, [conversationId, user?.uid]);
 
-    // Fetch Shared Secret and Partner Profile Key
+    // Fetch Partner Profile Key AND share own key using stable identity-linked secret
     useEffect(() => {
         const initPresenceKeys = async () => {
-            if (!targetUid || !conversationId) return;
-            const secret = await getConversationSharedSecret(targetUid);
-            if (secret) {
-                const sHex = secret.toString("hex");
-                setSharedSecretStr(sHex);
-                const pKey = await PresenceService.getPartnerProfileKey(conversationId, targetUid, sHex);
-                if (pKey) setPartnerProfileKey(pKey);
-            }
+            if (!targetUid || !conversationId || !user) return;
+            const participantIds = [user.uid, targetUid];
+            // Always share our own profile key so partner can see our presence
+            PresenceService.shareProfileKeyWithPartner(conversationId, participantIds).catch(() => {});
+            const pKey = await PresenceService.getPartnerProfileKey(conversationId, participantIds, targetUid);
+            if (pKey) setPartnerProfileKey(pKey);
         };
         initPresenceKeys();
-    }, [targetUid, conversationId]);
+    }, [targetUid, conversationId, user]);
 
-    // Subscribe to Other User's Presence
+    // Subscribe to Other User's Presence (encrypted if key available, raw fallback otherwise)
     useEffect(() => {
-        if (!targetUid || !partnerProfileKey) return;
-        const unsubscribe = PresenceService.subscribeToPartnerPresence(targetUid, partnerProfileKey, (lastSeen) => {
-            setPresence(lastSeen ? { isOnline: true, lastSeen } : null);
-        });
-        return unsubscribe;
+        if (!targetUid) return;
+        if (partnerProfileKey) {
+            // Encrypted presence via profile key
+            const unsubscribe = PresenceService.subscribeToPartnerPresence(targetUid, partnerProfileKey, (data) => {
+                // data is { isOnline: boolean, lastSeen: string | null } | null
+                // Use the raw Firestore isOnline boolean — never infer it from blob presence.
+                if (data) {
+                    setPresence({ isOnline: data.isOnline === true, lastSeen: data.lastSeen });
+                } else {
+                    setPresence(null);
+                }
+            });
+            return unsubscribe;
+        } else {
+            // Fallback: raw publicProfiles fields (unencrypted isOnline + lastSeen)
+            const unsubscribe = PresenceService.subscribeToRawPresence(targetUid, (data) => {
+                if (data) {
+                    setPresence({ isOnline: data.isOnline, lastSeen: data.lastSeen });
+                } else {
+                    setPresence(null);
+                }
+            });
+            return unsubscribe;
+        }
     }, [targetUid, partnerProfileKey]);
 
-    // Subscribe to Partner's Typing Status
+    // Subscribe to Partner's Typing Status using stable identity-linked secret
     useEffect(() => {
-        if (!conversationId || !sharedSecretStr) return;
-        const unsubscribe = PresenceService.subscribeToTyping(conversationId, sharedSecretStr, (isTyping) => {
+        if (!conversationId || !user || !targetUid) return;
+        const participantIds = [user.uid, targetUid];
+        const unsubscribe = PresenceService.subscribeToTyping(conversationId, participantIds, (isTyping) => {
             setIsPartnerTyping(isTyping);
         });
         return unsubscribe;
-    }, [conversationId, sharedSecretStr]);
+    }, [conversationId, user, targetUid]);
 
-    // Update My Typing Status
+    // Update My Typing Status using stable identity-linked secret
     useEffect(() => {
-        if (!conversationId || !sharedSecretStr) return;
+        if (!conversationId || !user || !targetUid) return;
+        const participantIds = [user.uid, targetUid];
         const isTyping = messageText.length > 0;
-        PresenceService.setTypingStatus(conversationId, sharedSecretStr, isTyping).catch(() => {});
+        PresenceService.setTypingStatus(conversationId, participantIds, isTyping).catch(() => {});
         
         // Auto-clear typing status after 5 seconds if no input
         let timer;
         if (isTyping) {
             timer = setTimeout(() => {
-                PresenceService.setTypingStatus(conversationId, sharedSecretStr, false).catch(() => {});
+                PresenceService.setTypingStatus(conversationId, participantIds, false).catch(() => {});
             }, 5000);
         }
         return () => clearTimeout(timer);
-    }, [messageText, conversationId, sharedSecretStr]);
+    }, [messageText, conversationId, user, targetUid]);
 
 
     const scrollTimerRef = useRef(null);
@@ -663,10 +684,10 @@ export function ChatInterface({
                 if (m.hiddenFor && user?.uid && m.hiddenFor.includes(user.uid)) return;
 
                 // Filter expired messages
-                if (m.expiresAt && now > m.expiresAt.toMillis()) return;
+                if (m.expiresAt && now > (m.expiresAt.toMillis ? m.expiresAt.toMillis() : m.expiresAt)) return;
 
                 // Filter future scheduled messages
-                if (m.scheduledAt && now < m.scheduledAt.toMillis()) {
+                if (m.scheduledAt && now < (m.scheduledAt.toMillis ? m.scheduledAt.toMillis() : m.scheduledAt)) {
                     if (m.senderId === user?.uid) {
                         scheduled.push(m);
                     }
@@ -674,7 +695,8 @@ export function ChatInterface({
                 }
 
                 // Filter messages cleared by the user locally
-                if (m.timestamp && m.timestamp.toMillis() <= clearedAt) return;
+                const msgTime = m.timestamp?.toMillis ? m.timestamp.toMillis() : (m.timestamp || 0);
+                if (msgTime <= clearedAt) return;
 
                 visible.push(m);
             });
@@ -716,8 +738,24 @@ export function ChatInterface({
                         let recoveredSenderId = msg.senderId;
 
                         if (decrypted && typeof decrypted === 'object' && decrypted.text) {
+                            // decryptAsync returned a sealed-sender object {text, senderId}
                             text = decrypted.text;
                             recoveredSenderId = decrypted.senderId;
+                        } else if (typeof decrypted === 'string' && decrypted.startsWith('{"s":')) {
+                            // GCM recovery returned the raw sealed-sender JSON string — parse it
+                            try {
+                                const parsed = JSON.parse(decrypted);
+                                if (parsed.m) { text = parsed.m; recoveredSenderId = parsed.s || msg.senderId; }
+                            } catch (_) { /* leave text as-is */ }
+                        }
+
+                        // 🔍 DEBUG: log version + decrypted result before guard
+                        const vPrefix = msg.encryptedText?.split?.(':')?.[0] ?? 'unknown';
+                        Logger.log(`[ChatInterface] 🔍 decrypt result | version=${vPrefix} | encVersion=${msg.encVersion ?? 'none'} | type=${typeof text} | isEmpty=${!text} | startsLock=${typeof text === 'string' && text.startsWith('\uD83D\uDD12')} | preview=${typeof text === 'string' ? text.substring(0,30) : JSON.stringify(text)?.substring(0,30)}`);
+
+                        // Guard: if decryption returned null or a raw failure indicator, lock the bubble
+                        if (!text || (typeof text === 'string' && text.startsWith('\uD83D\uDD12'))) {
+                            return { ...msg, encryptedText: null, isLocked: true };
                         }
 
                         const finalMsg = { ...msg, encryptedText: text, senderId: recoveredSenderId || msg.senderId };
@@ -729,7 +767,7 @@ export function ChatInterface({
 
                         return finalMsg;
                     } catch (error) {
-                        return { ...msg, encryptedText: "🔒 Message Locked", isLocked: true };
+                        return { ...msg, encryptedText: null, isLocked: true };
                     }
                 }));
 
@@ -742,9 +780,13 @@ export function ChatInterface({
                     const decryptedScheduled = await Promise.all(scheduled.map(async (msg) => {
                         try {
                             const decrypted = await decryptAsync(msg.encryptedText, encryptionKey, conversationId);
-                            return { ...msg, encryptedText: "🔒 Locked Message" };
+                            let text = (decrypted && typeof decrypted === 'object' && decrypted.text) ? decrypted.text : decrypted;
+                            if (!text || (typeof text === 'string' && text.startsWith('\uD83D\uDD12'))) {
+                                return { ...msg, encryptedText: null, isLocked: true };
+                            }
+                            return { ...msg, encryptedText: text };
                         } catch (e) {
-                            return { ...msg, encryptedText: "🔒 Locked Message" };
+                            return { ...msg, encryptedText: null, isLocked: true };
                         }
                     }));
                     setScheduledMessages(decryptedScheduled);
@@ -768,10 +810,12 @@ export function ChatInterface({
             const now = Date.now();
             setMessages(prev => prev.filter(msg => {
                 if (msg.expiresAt) {
-                    return msg.expiresAt.toMillis() > now;
+                    const exp = msg.expiresAt?.toMillis ? msg.expiresAt.toMillis() : (msg.expiresAt || 0);
+                    return exp > now;
                 }
                 if (msg.scheduledAt) {
-                    return msg.scheduledAt.toMillis() <= now;
+                    const sched = msg.scheduledAt?.toMillis ? msg.scheduledAt.toMillis() : (msg.scheduledAt || 0);
+                    return sched <= now;
                 }
                 return true;
             }));
@@ -1247,26 +1291,37 @@ export function ChatInterface({
                                         color: (() => {
                                             if (isPartnerTyping) return THEME.primary;
                                             const isOnline = presence?.isOnline;
-                                            const lastSeen = presence?.lastSeen?.toMillis ? presence.lastSeen.toMillis() : (presence?.lastSeen || 0);
-                                            const lastSeenValid = lastSeen && (Date.now() - lastSeen < 2 * 60 * 1000);
-                                            return (isOnline && lastSeenValid) ? '#10B981' : THEME.textSecondary;
+                                            const rawLastSeen = presence?.lastSeen;
+                                            const lastSeen = rawLastSeen?.toMillis ? rawLastSeen.toMillis() : (typeof rawLastSeen === 'string' ? new Date(rawLastSeen).getTime() : (rawLastSeen || 0));
+                                            const lastSeenRecent = lastSeen && (Date.now() - lastSeen < 5 * 60 * 1000);
+                                            return (isOnline || lastSeenRecent) ? '#10B981' : THEME.textSecondary;
                                         })()
                                     }}>
                                         {(() => {
-                                            if (isPartnerTyping) return "Typing...";
+                                            if (isPartnerTyping) return "typing...";
                                             const isOnline = presence?.isOnline;
-                                            const lastSeen = presence?.lastSeen?.toMillis ? presence.lastSeen.toMillis() : (presence?.lastSeen || 0);
-                                            const lastSeenValid = lastSeen && (Date.now() - lastSeen < 2 * 60 * 1000); // 2 mins
+                                            const rawLastSeen = presence?.lastSeen;
+                                            const lastSeen = rawLastSeen?.toMillis ? rawLastSeen.toMillis() : (typeof rawLastSeen === 'string' ? new Date(rawLastSeen).getTime() : (rawLastSeen || 0));
+                                            const lastSeenRecent = lastSeen && (Date.now() - lastSeen < 5 * 60 * 1000);
 
-                                            if (isOnline && lastSeenValid) return "Online";
+                                            if (isOnline || lastSeenRecent) return "online";
 
-                                            if (presence?.lastSeen) {
-                                                const date = presence.lastSeen.toDate ? presence.lastSeen.toDate() : new Date(presence.lastSeen);
-                                                const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                                                const isToday = new Date().toDateString() === date.toDateString();
-                                                return `Last seen ${isToday ? timeString : date.toLocaleDateString()} `;
+                                            if (rawLastSeen) {
+                                                const date = rawLastSeen.toDate ? rawLastSeen.toDate() : new Date(rawLastSeen);
+                                                if (isNaN(date.getTime())) return "Unknown";
+                                                const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+                                                const now = new Date();
+                                                const todayStr = now.toDateString();
+                                                const yesterday = new Date(now);
+                                                yesterday.setDate(yesterday.getDate() - 1);
+                                                const yesterdayStr = yesterday.toDateString();
+                                                const dateStr = date.toDateString();
+
+                                                if (dateStr === todayStr) return `last seen today at ${timeStr}`;
+                                                if (dateStr === yesterdayStr) return `last seen yesterday at ${timeStr}`;
+                                                return `last seen ${date.toLocaleDateString([], { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
                                             }
-                                            return "Offline";
+                                            return "Unknown";
                                         })()}
                                     </Text>
                                 </View>
@@ -1309,8 +1364,20 @@ export function ChatInterface({
                             )}
 
                             <Pressable
-                                onPress={() => startCall(otherUserUid, nickname || otherUserDisplayName || otherUserId)}
-                                style={{ padding: 8, marginTop: 6, marginRight: 4 }}
+                                onPress={() =>
+                                    otherUserUid &&
+                                    startCall(
+                                        otherUserUid,
+                                        nickname || otherUserDisplayName || otherUserId,
+                                        conversationId || null
+                                    )}
+                                disabled={!otherUserUid}
+                                style={({ pressed }) => ({
+                                    padding: 8,
+                                    marginTop: 6,
+                                    marginRight: 4,
+                                    opacity: !otherUserUid ? 0.35 : pressed ? 0.7 : 1,
+                                })}
                             >
                                 <Feather name="phone" size={20} color={THEME.primary} />
                             </Pressable>

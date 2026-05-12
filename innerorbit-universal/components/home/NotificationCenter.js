@@ -6,10 +6,10 @@ import { BlurView } from 'expo-blur';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export const RequestsCenter = ({
+export const NotificationCenter = ({
     visible,
     onClose,
-    requests = [],
+    notifications = [],
     onRespond,
     THEME,
     isDesktop
@@ -78,7 +78,7 @@ export const RequestsCenter = ({
                 })
             }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-                    <Text style={{ fontSize: 24, fontWeight: '900', color: '#FFF', letterSpacing: 0.5 }}>Requests</Text>
+                    <Text style={{ fontSize: 24, fontWeight: '900', color: '#FFF', letterSpacing: 0.5 }}>Notification Center</Text>
                     <Pressable onPress={onClose} style={{ padding: 4 }}>
                         <Feather name="x" size={36} color={THEME.primary} />
                     </Pressable>
@@ -88,20 +88,20 @@ export const RequestsCenter = ({
                     showsVerticalScrollIndicator={false}
                     contentContainerStyle={[
                         { paddingBottom: 20 },
-                        requests.length === 0 && { flex: 1, justifyContent: 'center' }
+                        notifications.length === 0 && { flex: 1, justifyContent: 'center' }
                     ]}
                 >
-                    {requests.length === 0 ? (
+                    {notifications.length === 0 ? (
                         <View style={{ alignItems: 'center' }}>
                             <Feather name="bell-off" size={40} color="#0EA5E9" style={{ opacity: 0.3, marginBottom: 12 }} />
-                            <Text style={{ color: THEME.textSecondary, fontSize: 14 }}>No pending requests</Text>
+                            <Text style={{ color: THEME.textSecondary, fontSize: 14 }}>No pending notifications</Text>
                         </View>
                     ) : (
-                        requests.map((request, idx) => {
-                            const senderId = request.senderInfo?.userId || "Unknown";
+                        notifications.map((notification, idx) => {
+                            const senderId = notification.senderInfo?.userId || "Unknown";
                             return (
                                 <View
-                                    key={request.id || idx}
+                                    key={notification.id || idx}
                                     style={{
                                         flexDirection: 'row',
                                         alignItems: 'center',
@@ -113,12 +113,12 @@ export const RequestsCenter = ({
                                 >
                                     <View style={{ flex: 1, marginRight: 12 }}>
                                         <Text style={{ color: THEME.text, fontWeight: '700', fontSize: 15 }}>User {senderId}</Text>
-                                        <Text style={{ color: THEME.textSecondary, fontSize: 12, marginTop: 2 }}>Secure contact request</Text>
+                                        <Text style={{ color: THEME.textSecondary, fontSize: 12, marginTop: 2 }}>Secure contact notification</Text>
                                     </View>
 
                                     <View style={{ flexDirection: 'row', gap: 10 }}>
                                         <Pressable
-                                            onPress={() => onRespond(request.id, 'declined', request.senderId)}
+                                            onPress={() => onRespond(notification.id, 'declined', notification.senderId)}
                                             style={({ pressed }) => ({
                                                 width: 36,
                                                 height: 36,
@@ -134,7 +134,7 @@ export const RequestsCenter = ({
                                             <Feather name="x" size={20} color="#EF4444" />
                                         </Pressable>
                                         <Pressable
-                                            onPress={() => onRespond(request.id, 'accepted', request.senderId)}
+                                            onPress={() => onRespond(notification.id, 'accepted', notification.senderId)}
                                             style={({ pressed }) => ({
                                                 width: 36,
                                                 height: 36,

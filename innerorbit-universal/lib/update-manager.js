@@ -5,7 +5,9 @@ import * as Network from 'expo-network';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Crypto from 'expo-crypto';
 import { Logger } from './logger';
+import { VersionHelper } from './version-helper';
 
 // Lazy load IntentLauncher to avoid top-level crash if native module is missing
 const getIntentLauncher = () => {
@@ -186,7 +188,7 @@ export const UpdateManager = {
             }
 
             const apkMeta = await resp.json();
-            if (apkMeta.version && apkMeta.version !== CURRENT_VERSION) {
+            if (apkMeta.version && VersionHelper.isNewer(apkMeta.version, CURRENT_VERSION)) {
                 return {
                     isAvailable: true,
                     type: 'apk',
@@ -309,10 +311,30 @@ export const UpdateManager = {
             );
 
             const { uri } = await downloadResumable.downloadAsync();
+
+            // Verify checksum if provided in manifest
+            if (url.includes('update.apk') && uri) {
+                // We'll call verify in installApk to keep download simple
+            }
+
             return uri;
         } catch (e) {
             Logger.error("[UpdateManager] APK Download failed:", e);
             throw e;
+        }
+    },
+
+    verifyApk: async (uri, expectedHash) => {
+        if (!expectedHash) return true;
+        try {
+            const hash = await Crypto.digestStringAsync(
+                Crypto.CryptoDigestAlgorithm.SHA256,
+                await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 })
+            );
+            return hash === expectedHash;
+        } catch (e) {
+            Logger.error("[UpdateManager] APK verification failed:", e);
+            return false;
         }
     },
 

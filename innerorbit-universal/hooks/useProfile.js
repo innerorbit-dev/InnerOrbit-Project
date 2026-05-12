@@ -59,6 +59,9 @@ export function useProfile(user, showError, showSuccess) {
             if (profile.photoMetadata) {
               loadSecurePhoto(user.uid, profile.photoMetadata);
             }
+
+            // 4. Ensure Public Profile is in sync (Legacy Repair)
+            firestoreService.repairPublicProfile(user.uid);
           } else {
             // Profile missing. Check account age to prevent accidental overwrites.
             const creationTime = user.metadata?.creationTime;

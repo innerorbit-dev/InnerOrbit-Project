@@ -1,6 +1,6 @@
 /** Purpose: List component for rendering active conversations on mobile. */
 import React from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, Animated, StyleSheet } from "react-native";
+import { View, Text, FlatList, Pressable, Animated, StyleSheet } from "react-native";
 import { isWeb, select } from "../../utils/platform";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from 'expo-linear-gradient';
@@ -54,7 +54,7 @@ export const ChatList = ({
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={THEME.primary} />
+        <LoadingDots color={THEME.primary} size={8} gap={4} />
       </View>
     );
   }

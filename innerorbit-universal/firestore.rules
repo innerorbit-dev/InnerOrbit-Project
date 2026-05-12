@@ -7,28 +7,28 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Users collection
+    // Users collection (Private Data: PIN, Email, etc.)
     match /users/{userId} {
-      // Authenticated users can read profiles
-      allow read: if isAuth(); 
-      
-      // Allow public listing for ID uniqueness check during signup
-      allow list: if true; 
+      allow read: if isAuth() && (
+        request.auth.uid == userId || 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)/contacts/$(userId))
+      ); 
+      allow list: if false; // Block enumeration of private profiles
 
-      // Writing: 
-      // 1. Full Auth users can update their own entire profile
-      // 2. PIN users (unauthenticated) can only update 'isOnline' and 'lastSeen' for presence parity
-      allow update: if (isAuth() && request.auth.uid == userId) || 
-                       (request.resource.data.diff(resource.data).affectedKeys()
-                        .hasOnly(['isOnline', 'lastSeen', 'updatedAt']));
-      
+      allow update: if isAuth() && request.auth.uid == userId;
       allow create, delete: if isAuth() && request.auth.uid == userId;
+    }
+
+    // Public Profiles (Searchable: userId, uid, displayName)
+    match /publicProfiles/{uid} {
+      allow read, list: if isAuth();
+      allow create, update: if isAuth() && request.auth.uid == uid;
+      allow delete: if false; // Controlled via user deletion
     }
 
     // Contacts Subcollection
     match /users/{userId}/contacts/{contactId} {
-      allow read, list: if isAuth() && request.auth.uid == userId;
-      allow write: if isAuth() && request.auth.uid == userId;
+      allow read, list, write: if isAuth() && request.auth.uid == userId;
     }
 
     // Ratchet Key Backups Subcollection
@@ -41,6 +41,12 @@ service cloud.firestore {
       allow read, update, delete: if isAuth() && request.auth.uid in resource.data.participantIds;
       allow create: if isAuth();
       
+      // 🛡️ Typing Indicators (Frequent Writes)
+      match /typing/{userId} {
+        allow read: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
+        allow write: if isAuth() && request.auth.uid == userId;
+      }
+
       match /messages/{messageId} {
         // 🕶️ Sealed Sender: Participants can read and append
         allow read: if isAuth() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(conversationId)).data.participantIds;
@@ -57,10 +63,10 @@ service cloud.firestore {
     // Connection Requests
     match /connectionRequests/{requestId} {
       allow get: if isAuth() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.receiverId); 
+      // Harden list: User must be a participant in the request and limit query depth
       allow list: if isAuth() && (
-        request.auth.uid == resource.data.receiverId ||
-        request.auth.uid == resource.data.senderId
-      );
+        (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.receiverId)
+      ); 
       allow create: if isAuth();
       allow update, delete: if isAuth() && (request.auth.uid == resource.data.senderId || request.auth.uid == resource.data.receiverId);
     }
@@ -69,16 +75,62 @@ service cloud.firestore {
     match /portal_passwords/{hash} { allow get, create: if true; }
     match /portal_access_logs/{logId} { allow create: if true; }
     match /app_metadata/{docId} { allow read: if true; }
-    // Global Calling signaling
+    // Global Calling signaling (WebRTC via Firestore — Spark-friendly)
     match /calls/{callId} {
-      allow create: if isAuth();
-      allow read, update, delete: if isAuth() && 
-        (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.recipientId);
-      
-      match /offerCandidates/{id} { allow read, write: if isAuth(); }
-      match /answerCandidates/{id} { allow read, write: if isAuth(); }
+      allow create: if isAuth()
+        && request.auth.uid == request.resource.data.callerId
+        && request.resource.data.recipientId is string
+        && request.resource.data.callerId is string
+        && request.resource.data.status == 'ringing';
+
+      allow read, update, delete: if isAuth() && (
+        request.auth.uid == resource.data.callerId ||
+        request.auth.uid == resource.data.recipientId
+      );
+
+      allow list: if isAuth() && (
+        request.auth.uid == resource.data.callerId ||
+        request.auth.uid == resource.data.recipientId
+      );
+
+      match /offerCandidates/{id} {
+        allow read, write: if isAuth() && (
+          request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerId ||
+          request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.recipientId
+        );
+      }
+      match /answerCandidates/{id} {
+        allow read, write: if isAuth() && (
+          request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerId ||
+          request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.recipientId
+        );
+      }
     }
 
-    match /app/version { allow read, write: if true; }
+    // 🛡️ HARDENED: App version info is public READ, but write access is DISABLED for clients.
+    // Must be updated via Firebase Console or Service Account (Backend/DevOps).
+    match /app/version { 
+      allow read: if true; 
+      allow write: if false; 
+    }
+
+    // 🕊️ Anonymous Presence Topics (Typing Indicators)
+    // Access is "blind" - you must know the Topic ID (SHA256 of shared secret)
+    match /presence_topics/{topicId} {
+      // Blind access based on SHA-256 topic ID; enumeration blocked
+      allow get, write: if isAuth();
+      allow list: if false;
+    }
+
+    match /media_vault/{vaultId} {
+      allow create: if isAuth();
+      // Read access allowed for owner OR conversation participants
+      allow read, update: if isAuth() && (
+        request.auth.uid == resource.data.ownerUid || 
+        (resource.data.conversationId != null && 
+         request.auth.uid in get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participantIds)
+      );
+      allow delete: if isAuth() && request.auth.uid == resource.data.ownerUid;
+    }
   }
 }

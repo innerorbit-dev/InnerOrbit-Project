@@ -34,7 +34,7 @@ export async function ensureSessionWithAutoRecovery(
         // 🔄 AUTO RECOVERY MODE: Session missing locally, but encrypted backup exists
         Logger.log(`[AutoRecovery] Attempting silent restore for conv=${conversationId.substring(0, 8)}...`);
         const restored = await restoreRatchetSession(user.uid, conversationId, foundUid, activePin);
-        
+
         if (restored) {
           Logger.log("[AutoRecovery] ✅ Success. History unlocked seamlessly.");
           return "RESTORED";
@@ -51,7 +51,7 @@ export async function ensureSessionWithAutoRecovery(
     } else {
       // 🆕 STANDARD INIT: Session exists OR no backup available
       const success = await svc.initializeRatchetIfNeeded(conversationId, user.uid, foundUid);
-      
+
       if (success && activePin && isBackupEnabled && !hasBackup) {
         // 💾 AUTO BACKUP: Freshly initialized session + Opted-In -> Securely store root key
         const state = await getRatchetSession(conversationId);

@@ -1,5 +1,5 @@
 import { getSecureItem, setSecureItem, encryptWithDeviceKey, decryptWithDeviceKey } from "./device-storage-service";
-import { encrypt, decrypt, ENC_VERSION_QUANTUM_CHACHA } from "./encryption-core";
+import { encrypt, decrypt, ENC_VERSION_QUANTUM_CHACHA } from "./encryption";
 import { Logger } from "./logger";
 import CryptoJS from "crypto-js";
 
@@ -59,7 +59,10 @@ export const IdentitySecurityService = {
       const encPin = await getSecureItem(LOCAL_ENC_PIN);
       const encUserId = await getSecureItem(LOCAL_ENC_USERID);
       
-      if (!encPin || !encUserId) return { userId: null, pin: null };
+      if (!encPin || !encUserId) {
+        Logger.warn("[Identity] No local identity found in secure storage.");
+        return { userId: null, pin: null };
+      }
       
       // 🛠️ DEV BYPASS: Return as-is if enabled
       if (DEV_MODE_PLAIN_IDENTITY) {
@@ -69,6 +72,7 @@ export const IdentitySecurityService = {
       const pin = await decryptWithDeviceKey(encPin);
       const userId = await decryptWithDeviceKey(encUserId);
       
+      Logger.log("[Identity] 🔓 Local identity decrypted successfully via hardware key.");
       return { userId, pin };
     } catch (e) {
       Logger.error("[Identity] Hardware decryption failed:", e);

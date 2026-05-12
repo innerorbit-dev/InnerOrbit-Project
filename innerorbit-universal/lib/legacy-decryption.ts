@@ -22,6 +22,13 @@ export function decryptLegacy(ciphertext: string, secretKey: string): string {
       return attemptWebLegacyDecryption(parts, secretKey, version);
     }
 
+    // --- STRATEGY: Quantum Hybrid CTR Recovery (v5 / v5.5 — 5 parts) ---
+    // Web's old sync path encrypts v5/v5.5 with CryptoJS AES-CTR + zero auth tag.
+    // Mobile native GCM rejects them. We re-derive the hybrid key and try CTR.
+    if ((version === 'v5' || version === 'v5.5') && parts.length >= 5) {
+      return attemptQuantumLegacyDecryption(parts, secretKey, version);
+    }
+
     // --- STRATEGY: Native GCM Recovery (v2, v3, v3.5) ---
     if (parts.length >= 4) {
       return attemptNativeLegacyDecryption(parts, secretKey, version);
@@ -35,6 +42,7 @@ export function decryptLegacy(ciphertext: string, secretKey: string): string {
     return "🔒 [Legacy Decryption Error]";
   }
 }
+
 
 /**
  * Attempt to decrypt legacy web-formatted messages
@@ -94,6 +102,52 @@ function attemptWebLegacyDecryption(parts: string[], secretKey: string, version:
 }
 
 /**
+ * Attempt to recover v5/v5.5 ciphertexts produced by the old Web CTR sync path.
+ * Format: v5:iv_b64:tag_b64:pqcCt_b64:payload_b64
+ * The "tag" is 16 zero bytes (dummy). Mobile GCM fails; we fall back to CTR.
+ */
+function attemptQuantumLegacyDecryption(parts: string[], secretKey: string, version: string): string {
+  try {
+    const iv = Buffer.from(parts[1], "base64");
+    // parts[2] = dummy zero tag (ignored in CTR recovery)
+    const pqcCt = Buffer.from(parts[3], "base64");
+    const dataBase64 = parts[4];
+
+    // We can't call ml_kem768.decapsulate without the private key here (legacy shim is key-agnostic).
+    // Fall back to non-PQC hybrid key: SHA-256(hashedSecretKey) — matches the CTR path
+    // used by the old Web encrypt() which did not correctly mix the PQC shared secret.
+    const keyHashed = createHash('sha256').update(secretKey).digest();
+
+    const suffixes = ["00000002", "00000001", "00000000"];
+    const keysToTry = [keyHashed, Buffer.from(secretKey, 'utf8')];
+
+    for (const key of keysToTry) {
+      for (const suffix of suffixes) {
+        try {
+          const hexKey = CryptoJS.enc.Hex.parse(Buffer.from(key).toString("hex"));
+          const paddedIv = iv.length === 12 ? Buffer.from(iv.toString("hex") + suffix, "hex") : iv;
+          const hexIv = CryptoJS.enc.Hex.parse(paddedIv.toString("hex"));
+          const bytes = CryptoJS.AES.decrypt(dataBase64, hexKey, {
+            iv: hexIv, mode: CryptoJS.mode.CTR, padding: CryptoJS.pad.NoPadding
+          });
+          let res = bytes.toString(CryptoJS.enc.Utf8);
+          if (res) res = res.replace(/\0/g, '').trim();
+          if (res && res.length > 0 && !/[\x01-\x08\x0E-\x1F]/.test(res)) {
+            Logger.log(`[legacy-decryption] ✅ Quantum CTR Recovery (${version}, suffix=${suffix})`);
+            return res;
+          }
+        } catch (e) { }
+      }
+    }
+
+    Logger.warn(`[legacy-decryption] Quantum CTR recovery exhausted for ${version}`);
+    return "🔒 [Quantum Legacy Fail]";
+  } catch (e) {
+    return "🔒 [Quantum Legacy Fail]";
+  }
+}
+
+/**
  * Attempt to decrypt legacy native GCM messages (Strategies 1-4)
  */
 function attemptNativeLegacyDecryption(parts: string[], secretKey: string, version: string): string {
@@ -114,6 +168,23 @@ function attemptNativeLegacyDecryption(parts: string[], secretKey: string, versi
       let decrypted = decipher.update(dataBase64, "base64", "utf8");
       decrypted += decipher.final("utf8");
       if (decrypted) return decrypted.replace(/\0/g, '').trim();
+    } catch (e: any) {
+      Logger.warn(`[legacy-decryption] ⚠️ Strategy1 GCM failed | version=${version} | ivLen=${iv.length} | tagLen=${tag.length} | reason=${e?.message ?? e}`);
+    }
+  }
+
+  // Strategy 1b: Double-hashed key (covers case where web hashed an already-hashed key)
+  if (isMobile) {
+    try {
+      const doubleHashed = createHash('sha256').update(keyHashed).digest();
+      const decipher = createDecipheriv("aes-256-gcm", doubleHashed as any, iv as any);
+      decipher.setAuthTag(tag as any);
+      let decrypted = decipher.update(dataBase64, "base64", "utf8");
+      decrypted += decipher.final("utf8");
+      if (decrypted) {
+        Logger.log(`[legacy-decryption] ✅ Strategy1b double-hash GCM succeeded`);
+        return decrypted.replace(/\0/g, '').trim();
+      }
     } catch (e) { }
   }
 
@@ -150,6 +221,10 @@ function attemptNativeLegacyDecryption(parts: string[], secretKey: string, versi
     res = tryCTR(keyHex);
     if (res) return res;
   }
+
+  // Strategy 4: Raw UTF-8 Key fallback (some very early sync web shims used raw keys)
+  res = tryCTR(Buffer.from(secretKey, 'utf8'));
+  if (res) return res;
 
   return "🔒 [Native Legacy Fail]";
 }

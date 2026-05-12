@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, Pressable, Image, useWindowDimensions } from "react-native";
 import { isMobileLayout, select, Platform } from "../../utils/platform";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { decrypt, deriveConversationKey, isEncrypted } from "../../lib/encryption";
+import { isEncrypted } from "../../lib/encryption"; // decrypt handled upstream in useConversations
 import { getHomeStyles } from "../../styles/home.styles";
 
 const ACCOUNT_IMG = require('../../assets/account.webp');
@@ -23,12 +23,19 @@ export const ConversationItem = ({
   // Format Time: "10:30 AM" or "Yesterday"
   let timeLabel = "";
   if (item.lastMessageTime) {
-    const date = new Date(item.lastMessageTime.toMillis());
-    const now = new Date();
-    if (date.toDateString() === now.toDateString()) {
-      timeLabel = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      timeLabel = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    try {
+      const millis = item.lastMessageTime.toMillis ? item.lastMessageTime.toMillis() : (item.lastMessageTime.seconds ? item.lastMessageTime.seconds * 1000 : item.lastMessageTime);
+      const date = new Date(millis);
+      const now = new Date();
+      if (!isNaN(date.getTime())) {
+        if (date.toDateString() === now.toDateString()) {
+          timeLabel = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } else {
+          timeLabel = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        }
+      }
+    } catch (e) {
+      timeLabel = "";
     }
   }
 
@@ -62,7 +69,8 @@ export const ConversationItem = ({
             borderRadius: 6,
             backgroundColor: (() => {
               const isOnline = item.isOnline;
-              const lastSeenValid = item.lastSeen && (Date.now() - item.lastSeen.toMillis() < 2 * 60 * 1000);
+              const millis = item.lastSeen?.toMillis ? item.lastSeen.toMillis() : (item.lastSeen?.seconds ? item.lastSeen.seconds * 1000 : (item.lastSeen || 0));
+              const lastSeenValid = millis && (Date.now() - millis < 5 * 60 * 1000); // 5 mins
               return (isOnline && lastSeenValid) ? THEME.success : THEME.textSecondary;
             })(),
             borderWidth: 2,
@@ -96,15 +104,13 @@ export const ConversationItem = ({
                 }
               ]}>
                 {(() => {
-                  const text = item.lastMessage || "Start a secure conversation";
-                  if (isEncrypted(text)) {
-                    try {
-                      const key = deriveConversationKey(item.id, item.participantIds);
-                      return decrypt(text, key);
-                    } catch (e) {
-                      return "🔒 Encrypted Message";
-                    }
-                  }
+                  // useConversations pre-decrypts lastMessage before passing it here.
+                  // Do NOT re-attempt sync decrypt — it fails for v5.5 (ChaCha20-Poly1305)
+                  // without the PQC secret key. Trust the pre-decrypted value;
+                  // blank it only if it somehow arrived still encrypted.
+                  const text = item.lastMessage;
+                  if (!text) return item.lastMessageTime ? "🔒 Message" : "Start a secure conversation";
+                  if (isEncrypted(text)) return ""; // should not happen — blank gracefully
                   return text;
                 })()}
               </Text>
@@ -181,7 +187,8 @@ export const ConversationItem = ({
           borderRadius: 7,
           backgroundColor: (() => {
             const isOnline = item.isOnline;
-            const lastSeenValid = item.lastSeen && (Date.now() - item.lastSeen.toMillis() < 2 * 60 * 1000); // 2 mins
+            const millis = item.lastSeen?.toMillis ? item.lastSeen.toMillis() : (item.lastSeen?.seconds ? item.lastSeen.seconds * 1000 : (item.lastSeen || 0));
+            const lastSeenValid = millis && (Date.now() - millis < 5 * 60 * 1000); // 5 mins
             return (isOnline && lastSeenValid) ? THEME.success : THEME.textSecondary;
           })(),
           borderWidth: 2,
@@ -226,15 +233,13 @@ export const ConversationItem = ({
               }]}
             >
               {(() => {
-                const text = item.lastMessage || "Start a secure conversation";
-                if (isEncrypted(text)) {
-                  try {
-                    const key = deriveConversationKey(item.id, item.participantIds);
-                    return decrypt(text, key);
-                  } catch (e) {
-                    return "🔒 Encrypted Message";
-                  }
-                }
+                // useConversations pre-decrypts lastMessage before passing it here.
+                // Do NOT re-attempt sync decrypt — it fails for v5.5 (ChaCha20-Poly1305)
+                // without the PQC secret key. Trust the pre-decrypted value;
+                // blank it only if it somehow arrived still encrypted.
+                const text = item.lastMessage;
+                if (!text) return item.lastMessageTime ? "🔒 Message" : "Start a secure conversation";
+                if (isEncrypted(text)) return ""; // should not happen — blank gracefully
                 return text;
               })()}
             </Text>

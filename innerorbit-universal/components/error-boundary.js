@@ -2,6 +2,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView, LogBox, Animated, Easing, NativeModules, useWindowDimensions } from 'react-native';
 import { select, isWeb, isIOS } from '../utils/platform';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Updates from 'expo-updates';
 import * as Clipboard from 'expo-clipboard';
@@ -130,6 +131,7 @@ function AnimatedFixBox({ fix }) {
 const ThemedErrorBoundaryLayout = ({ error, errorInfo, errorData, onRestart }) => {
     const { theme, isDark } = useAppTheme();
     const { width } = useWindowDimensions();
+    const insets = useSafeAreaInsets();
     const isDesktop = width >= 768;
     const [copied, setCopied] = React.useState(false);
     const spinAnim = useRef(new Animated.Value(0)).current;
@@ -234,7 +236,7 @@ const ThemedErrorBoundaryLayout = ({ error, errorInfo, errorData, onRestart }) =
             <View style={[styles.footer, {
                 backgroundColor: theme.background,
                 borderTopColor: theme.border,
-                paddingBottom: isWeb ? 40 : 30
+                paddingBottom: isWeb ? 40 : Math.max(insets.bottom + 12, 24)
             }]}>
                 <View style={isDesktop ? styles.desktopMaxContent : { width: '100%' }}>
                     <Pressable

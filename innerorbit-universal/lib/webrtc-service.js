@@ -1,36 +1,31 @@
 /**
- * Purpose: Handles WebRTC Peer-to-Peer encrypted voice and video calling.
- * Acts as the Signaling Service using Firebase Firestore to connect users before
- * the P2P connection locks in.
+ * Purpose: WebRTC voice calling with Firestore-only signaling (Firebase Spark–friendly).
+ * Uses STUN by default; optional TURN via user profile or app extra (see call-context).
  */
 
 import { db } from './firebase';
 import { Logger } from './logger';
-import { 
-    collection, 
-    doc, 
-    setDoc, 
-    addDoc, 
-    onSnapshot, 
-    updateDoc, 
-    deleteDoc, 
-    getDoc,
+import {
+    collection,
+    doc,
+    setDoc,
+    addDoc,
+    onSnapshot,
+    updateDoc,
     query,
-    where
+    where,
 } from 'firebase/firestore';
 
-// Note: You must run `npm install react-native-webrtc` to use these objects natively
 import { isWeb } from '../utils/platform';
+
 let RTCConnection, RTCICecandidate, RTCSessDescription, mediaDevs;
 
 if (isWeb) {
-    // Web & Windows (Electron) Native Browser APIs
     RTCConnection = window.RTCPeerConnection || window.webkitRTCPeerConnection;
     RTCICecandidate = window.RTCIceCandidate;
     RTCSessDescription = window.RTCSessionDescription;
     mediaDevs = navigator.mediaDevices;
 } else {
-    // iOS & Android Native Hardware APIs
     const RNWebRTC = require('react-native-webrtc');
     RTCConnection = RNWebRTC.RTCPeerConnection;
     RTCICecandidate = RNWebRTC.RTCIceCandidate;
@@ -38,49 +33,132 @@ if (isWeb) {
     mediaDevs = RNWebRTC.mediaDevices;
 }
 
-const configuration = {
-    iceServers: [
-        {
-            urls: [
-                'stun:stun1.l.google.com:19302',
-                'stun:stun2.l.google.com:19302',
-            ],
-        },
-    ],
-    iceCandidatePoolSize: 10,
-};
+const defaultIceServers = [
+    {
+        urls: [
+            'stun:stun1.l.google.com:19302',
+            'stun:stun2.l.google.com:19302',
+        ],
+    },
+];
 
 export class WebRTCService {
     constructor(currentUserId, options = {}) {
         this.currentUserId = currentUserId;
-        this.options = options; // { protectIP: boolean, turnServers: [] }
+        /** @type {{ protectIP?: boolean, turnServers?: object[], onStreamsChanged?: Function, onCallEnded?: () => void }} */
+        this.options = options;
         this.peerConnection = null;
         this.localStream = null;
         this.remoteStream = null;
         this.callDocRef = null;
         this.unsubscribeCall = null;
         this.unsubscribeAnswer = null;
+        this._iceUnsubs = [];
+        this._pendingRemoteIce = [];
+        this._hangupLock = false;
+    }
+
+    _pushIceUnsub(unsub) {
+        if (typeof unsub === 'function') this._iceUnsubs.push(unsub);
+    }
+
+    _clearIceUnsubs() {
+        this._iceUnsubs.forEach((u) => {
+            try {
+                u();
+            } catch (_) { /* noop */ }
+        });
+        this._iceUnsubs = [];
+    }
+
+    _notifyStreams(local, remote) {
+        try {
+            this.options.onStreamsChanged?.({ local, remote });
+        } catch (e) {
+            Logger.warn('[WebRTC] onStreamsChanged error:', e?.message);
+        }
+    }
+
+    _flushPendingIce() {
+        if (!this.peerConnection?.remoteDescription) return;
+        while (this._pendingRemoteIce.length) {
+            const c = this._pendingRemoteIce.shift();
+            this.peerConnection.addIceCandidate(c).catch(() => {});
+        }
+    }
+
+    _safeAddIceCandidate(candidate) {
+        if (!this.peerConnection) return;
+        if (!this.peerConnection.remoteDescription) {
+            this._pendingRemoteIce.push(candidate);
+            return;
+        }
+        this.peerConnection.addIceCandidate(candidate).catch((e) => {
+            Logger.warn('[WebRTC] addIceCandidate:', e?.message);
+        });
+    }
+
+    async _disposePeerLocalOnly() {
+        this._clearIceUnsubs();
+        if (this.unsubscribeCall) {
+            try {
+                this.unsubscribeCall();
+            } catch (_) { /* noop */ }
+            this.unsubscribeCall = null;
+        }
+        if (this.unsubscribeAnswer) {
+            try {
+                this.unsubscribeAnswer();
+            } catch (_) { /* noop */ }
+            this.unsubscribeAnswer = null;
+        }
+
+        if (this.peerConnection) {
+            try {
+                this.peerConnection.onicecandidate = null;
+                this.peerConnection.ontrack = null;
+                this.peerConnection.close();
+            } catch (_) { /* noop */ }
+            this.peerConnection = null;
+        }
+
+        if (this.localStream) {
+            try {
+                this.localStream.getTracks().forEach((t) => t.stop());
+            } catch (_) { /* noop */ }
+            this.localStream = null;
+        }
+
+        this.remoteStream = null;
+        this._pendingRemoteIce = [];
+        this._notifyStreams(null, null);
     }
 
     /**
-     * Step 1: Initialize the Peer Connection and get Local Media (Mic Only)
+     * Mic + RTCPeerConnection. Safe to call again (tears down previous peer).
      */
     async initConnection(isVideoEnabled = false) {
+        await this._disposePeerLocalOnly();
+
         try {
-            Logger.log('[WebRTC] Initializing Voice Peer Connection...');
-            
-            // Build configuration dynamically
-            const finalConfig = { ...configuration };
-            
-            // If TURN servers are provided in options, add them
-            if (this.options.turnServers && this.options.turnServers.length > 0) {
+            Logger.log('[WebRTC] Initializing voice peer connection...');
+
+            const finalConfig = {
+                iceServers: [...defaultIceServers],
+                iceCandidatePoolSize: 10,
+            };
+
+            if (this.options.turnServers?.length) {
                 finalConfig.iceServers = [...finalConfig.iceServers, ...this.options.turnServers];
             }
 
-            // ENFORCING PRIVACY: Force relay if protectIP is enabled
             if (this.options.protectIP) {
-                Logger.log('[WebRTC] 🛡️ IP Protection Enabled: Forcing TURN relay mode.');
-                finalConfig.iceTransportPolicy = 'relay';
+                if (this.options.turnServers?.length) {
+                    Logger.log('[WebRTC] IP protection: relay-only (TURN configured).');
+                    finalConfig.iceTransportPolicy = 'relay';
+                } else {
+                    Logger.warn('[WebRTC] protectIP set but no TURN servers — falling back to STUN (IP may leak). Add TURN for true relay.');
+                }
             }
 
             this.peerConnection = new RTCConnection(finalConfig);
@@ -91,32 +169,34 @@ export class WebRTCService {
             });
 
             this.localStream = stream;
-            
-            // Add tracks to the peer connection
             stream.getTracks().forEach((track) => {
                 this.peerConnection.addTrack(track, stream);
             });
 
-            // Listen for remote tracks
             this.peerConnection.ontrack = (event) => {
-                Logger.log('[WebRTC] Received remote track');
-                if (event.streams && event.streams[0]) {
+                Logger.log('[WebRTC] Remote track received');
+                if (event.streams?.[0]) {
                     this.remoteStream = event.streams[0];
+                    this._notifyStreams(this.localStream, this.remoteStream);
                 }
             };
 
+            this._notifyStreams(this.localStream, null);
             return this.localStream;
         } catch (error) {
             Logger.error('[WebRTC] Initialization failed:', error);
+            await this._disposePeerLocalOnly();
             throw error;
         }
     }
 
     /**
-     * Step 2: Caller - Start a Call (Create Offer)
+     * Caller: create offer + Firestore room.
+     * @param {string} recipientId
+     * @param {{ callerName?: string, conversationId?: string | null, recipientName?: string | null }} metadata
      */
-    async startCall(recipientId) {
-        if (!this.peerConnection) throw new Error("Call not initialized");
+    async startCall(recipientId, metadata = {}) {
+        if (!this.peerConnection) throw new Error('Call not initialized');
 
         const callDoc = doc(collection(db, 'calls'));
         this.callDocRef = callDoc;
@@ -124,14 +204,12 @@ export class WebRTCService {
         const offerCandidates = collection(callDoc, 'offerCandidates');
         const answerCandidates = collection(callDoc, 'answerCandidates');
 
-        // Save ICE candidates to Firebase
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                addDoc(offerCandidates, event.candidate.toJSON());
+                addDoc(offerCandidates, event.candidate.toJSON()).catch(() => {});
             }
         };
 
-        // Create WebRTC Offer
         const offerDescription = await this.peerConnection.createOffer();
         await this.peerConnection.setLocalDescription(offerDescription);
 
@@ -140,80 +218,135 @@ export class WebRTCService {
             type: offerDescription.type,
         };
 
-        // Write offer to Firebase
+        const callerName = metadata.callerName || 'InnerOrbit user';
+        const conversationId = metadata.conversationId || null;
+        const recipientName = metadata.recipientName || null;
+        const participantIds = [this.currentUserId, recipientId].sort();
+
         await setDoc(callDoc, {
             callerId: this.currentUserId,
-            recipientId: recipientId,
-            offer: offer,
+            recipientId,
+            participantIds,
+            callerName,
+            recipientName,
+            conversationId,
+            offer,
             status: 'ringing',
-            timestamp: new Date().getTime()
+            timestamp: Date.now(),
         });
 
-        Logger.log('[WebRTC] Call started, ringing user:', recipientId);
+        Logger.log('[WebRTC] Call ringing:', recipientId);
 
-        // Listen for an Answer from the recipient
         this.unsubscribeAnswer = onSnapshot(callDoc, (snapshot) => {
             const data = snapshot.data();
-            if (!this.peerConnection.currentRemoteDescription && data?.answer) {
-                const answerDescription = new RTCSessDescription(data.answer);
-                this.peerConnection.setRemoteDescription(answerDescription);
-            }
+            if (!data) return;
+
             if (data?.status === 'ended') {
                 this.hangUp();
+                return;
+            }
+
+            if (!this.peerConnection) return;
+
+            if (!this.peerConnection.currentRemoteDescription && data.answer) {
+                const answerDescription = new RTCSessDescription(data.answer);
+                void this.peerConnection
+                    .setRemoteDescription(answerDescription)
+                    .then(() => this._flushPendingIce())
+                    .catch((e) => Logger.error('[WebRTC] setRemoteDescription (answer):', e));
             }
         });
 
-        // Listen for Remote ICE Candidates
-        onSnapshot(answerCandidates, (snapshot) => {
+        const unsubIce = onSnapshot(answerCandidates, (snapshot) => {
             snapshot.docChanges().forEach((change) => {
                 if (change.type === 'added') {
-                    const candidate = new RTCICecandidate(change.doc.data());
-                    this.peerConnection.addIceCandidate(candidate);
+                    try {
+                        const candidate = new RTCICecandidate(change.doc.data());
+                        this._safeAddIceCandidate(candidate);
+                    } catch (e) {
+                        Logger.warn('[WebRTC] ICE parse:', e?.message);
+                    }
                 }
             });
         });
+        this._pushIceUnsub(unsubIce);
 
-        return callDoc.id; // Return the Call Room ID
+        return callDoc.id;
     }
 
-    /**
-     * Hang up and clean up resources
-     */
     async hangUp() {
-        Logger.log('[WebRTC] Hanging up...');
-        if (this.unsubscribeCall) this.unsubscribeCall();
-        if (this.unsubscribeAnswer) this.unsubscribeAnswer();
-        
-        if (this.callDocRef) {
-            await updateDoc(this.callDocRef, { status: 'ended' }).catch(() => {});
-        }
+        if (this._hangupLock) return;
+        this._hangupLock = true;
+        try {
+            Logger.log('[WebRTC] Hanging up...');
 
-        if (this.peerConnection) {
-            this.peerConnection.close();
-            this.peerConnection = null;
-        }
+            if (this.unsubscribeAnswer) {
+                try {
+                    this.unsubscribeAnswer();
+                } catch (_) { /* noop */ }
+                this.unsubscribeAnswer = null;
+            }
+            if (this.unsubscribeCall) {
+                try {
+                    this.unsubscribeCall();
+                } catch (_) { /* noop */ }
+                this.unsubscribeCall = null;
+            }
 
-        if (this.localStream) {
-            this.localStream.getTracks().forEach(track => track.stop());
-            this.localStream = null;
-        }
+            this._clearIceUnsubs();
 
-        this.remoteStream = null;
+            if (this.callDocRef) {
+                await updateDoc(this.callDocRef, { status: 'ended' }).catch(() => {});
+            }
+
+            this.callDocRef = null;
+
+            if (this.peerConnection) {
+                try {
+                    this.peerConnection.close();
+                } catch (_) { /* noop */ }
+                this.peerConnection = null;
+            }
+
+            if (this.localStream) {
+                try {
+                    this.localStream.getTracks().forEach((track) => track.stop());
+                } catch (_) { /* noop */ }
+                this.localStream = null;
+            }
+
+            this.remoteStream = null;
+            this._pendingRemoteIce = [];
+            this._notifyStreams(null, null);
+        } finally {
+            this._hangupLock = false;
+            try {
+                this.options.onCallEnded?.();
+            } catch (_) { /* noop */ }
+        }
     }
 
-    /**
-     * Step 3: Receiver - Listen for Incoming Calls
-     */
-    listenForIncomingCalls(onIncomingCall) {
+    listenForIncomingCalls(onIncomingCall, onRingingGone) {
         const callsQuery = query(
             collection(db, 'calls'),
             where('recipientId', '==', this.currentUserId),
-            where('status', '==', 'ringing')
+            where('status', '==', 'ringing'),
         );
 
         return onSnapshot(callsQuery, (snapshot) => {
             snapshot.docChanges().forEach((change) => {
-                if (change.type === 'added') {
+                if (change.type === 'removed') {
+                    onRingingGone?.(change.doc.id);
+                    return;
+                }
+                if (change.type === 'modified') {
+                    const d = change.doc.data();
+                    if (d.status !== 'ringing') {
+                        onRingingGone?.(change.doc.id);
+                        return;
+                    }
+                }
+                if (change.type === 'added' || change.type === 'modified') {
                     const data = change.doc.data();
                     if (data.recipientId === this.currentUserId && data.status === 'ringing') {
                         onIncomingCall({ callId: change.doc.id, ...data });
@@ -223,27 +356,22 @@ export class WebRTCService {
         });
     }
 
-    /**
-     * Step 4: Receiver - Answer a Call
-     */
     async answerCall(callId, offerDescription) {
-        if (!this.peerConnection) throw new Error("Call not initialized");
+        if (!this.peerConnection) throw new Error('Call not initialized');
 
         this.callDocRef = doc(db, 'calls', callId);
         const offerCandidates = collection(this.callDocRef, 'offerCandidates');
         const answerCandidates = collection(this.callDocRef, 'answerCandidates');
 
-        // Save our ICE candidates to Firebase
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                addDoc(answerCandidates, event.candidate.toJSON());
+                addDoc(answerCandidates, event.candidate.toJSON()).catch(() => {});
             }
         };
 
-        // Set remote description from caller's offer
         await this.peerConnection.setRemoteDescription(new RTCSessDescription(offerDescription));
+        this._flushPendingIce();
 
-        // Create WebRTC Answer
         const answerDescription = await this.peerConnection.createAnswer();
         await this.peerConnection.setLocalDescription(answerDescription);
 
@@ -252,36 +380,44 @@ export class WebRTCService {
             type: answerDescription.type,
         };
 
-        // Write answer to Firebase
-        await updateDoc(this.callDocRef, { 
-            answer: answer,
-            status: 'answered'
+        await updateDoc(this.callDocRef, {
+            answer,
+            status: 'answered',
         });
 
-        // Listen for Caller's ICE Candidates
-        onSnapshot(offerCandidates, (snapshot) => {
+        const unsubOfferIce = onSnapshot(offerCandidates, (snapshot) => {
             snapshot.docChanges().forEach((change) => {
                 if (change.type === 'added') {
-                    const candidate = new RTCICecandidate(change.doc.data());
-                    this.peerConnection.addIceCandidate(candidate);
+                    try {
+                        const candidate = new RTCICecandidate(change.doc.data());
+                        this._safeAddIceCandidate(candidate);
+                    } catch (e) {
+                        Logger.warn('[WebRTC] ICE parse (offer):', e?.message);
+                    }
                 }
             });
         });
+        this._pushIceUnsub(unsubOfferIce);
 
-        // Listen for Hangup
         this.unsubscribeCall = onSnapshot(this.callDocRef, (snapshot) => {
             const data = snapshot.data();
             if (data?.status === 'ended') {
-                this.hangUp();
+                void this.hangUp();
             }
         });
     }
 
-    /**
-     * Step 5: Receiver - Reject a Call
-     */
     async rejectCall(callId) {
         const callDoc = doc(db, 'calls', callId);
         await updateDoc(callDoc, { status: 'ended' }).catch(() => {});
+    }
+
+    /** @returns {boolean} muted */
+    setMicMuted(muted) {
+        if (!this.localStream) return false;
+        const audio = this.localStream.getAudioTracks()[0];
+        if (!audio) return false;
+        audio.enabled = !muted;
+        return muted;
     }
 }

@@ -1,17 +1,27 @@
 /** Purpose: Unified bouncing dots animation for 'Loading...' states. */
 import React from "react";
-import { View, Animated, Text } from "react-native";
+import { View, Animated, Text, Easing } from "react-native";
 import { isWeb } from "../../utils/platform";
 
-export const LoadingDots = ({ color = "#60a5fa", size = 4, gap = 2, showText = false, label = "Loading..." }) => {
+export const LoadingDots = ({ color = "#60a5fa", size = 4, gap = 2, showText = false, label = "Loading...", style = {} }) => {
   const animations = React.useRef([...Array(3)].map(() => new Animated.Value(0))).current;
 
   React.useEffect(() => {
     const loop = Animated.loop(
       Animated.stagger(150, animations.map(anim =>
         Animated.sequence([
-          Animated.timing(anim, { toValue: -6, duration: 300, useNativeDriver: !isWeb }),
-          Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: !isWeb })
+          Animated.timing(anim, { 
+            toValue: -6, 
+            duration: 300, 
+            easing: Easing.bezier(0.4, 0, 0.2, 1),
+            useNativeDriver: !isWeb 
+          }),
+          Animated.timing(anim, { 
+            toValue: 0, 
+            duration: 300, 
+            easing: Easing.bezier(0.4, 0, 0.2, 1),
+            useNativeDriver: !isWeb 
+          })
         ])
       ))
     );
@@ -20,7 +30,7 @@ export const LoadingDots = ({ color = "#60a5fa", size = 4, gap = 2, showText = f
   }, [animations]);
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+    <View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center' }, style]}>
       {showText && (
         <Text style={{ color, fontSize: 13, marginRight: 8, fontWeight: '600', letterSpacing: 0.5 }}>
           {label}

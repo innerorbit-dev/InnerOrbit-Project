@@ -386,6 +386,20 @@ const MessageBubble = ({
                             isOwn={isOwnMessage} 
                             mimeType={item.mimeType}
                         />
+                    ) : item.isLocked ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 }}>
+                            <Feather name="lock" size={13} color={isOwnMessage ? 'rgba(255,255,255,0.7)' : theme.textSecondary} />
+                            <Text style={[
+                                styles.messageText,
+                                {
+                                    color: isOwnMessage ? 'rgba(255,255,255,0.65)' : theme.textSecondary,
+                                    fontStyle: 'italic',
+                                    fontSize: 13,
+                                }
+                            ]}>
+                                Encrypted message
+                            </Text>
+                        </View>
                     ) : (
                         <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
                             <Text style={[
@@ -555,6 +569,7 @@ export default memo(MessageBubble, (prevProps, nextProps) => {
     return (
         prevProps.item.id === nextProps.item.id &&
         prevProps.item.encryptedText === nextProps.item.encryptedText &&
+        prevProps.item.isLocked === nextProps.item.isLocked &&
         prevProps.item.status === nextProps.item.status &&
         prevProps.item.isDeleted === nextProps.item.isDeleted &&
         prevProps.item.reactions === nextProps.item.reactions &&
