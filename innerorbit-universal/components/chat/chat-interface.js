@@ -1698,6 +1698,10 @@ export function ChatInterface({
                             textAlignVertical="center"
                             editable={!sending}
                             showSoftInputOnFocus={!useStealthKeyboard}
+                            spellCheck={false}
+                            autoComplete="off"
+                            autoCorrect={false}
+                            autoCapitalize="none"
                             onFocus={() => {
                                 if (!useStealthKeyboard) setKeyboardVisible(true);
                             }}
